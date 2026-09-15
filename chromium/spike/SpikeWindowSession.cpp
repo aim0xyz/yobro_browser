@@ -32,7 +32,7 @@ void SpikeWindow::loadSession(const QString &initialUrl) {
             const QString space = folder.value(QStringLiteral("space")).toString();
             const QString color = folder.value(QStringLiteral("color")).toString();
             if (!id.isEmpty() && !name.isEmpty() && spaces_.contains(space)) {
-                workspaceFolders_.push_back({id, name, space, QColor(color).isValid() ? QColor(color).name(QColor::HexRgb) : QStringLiteral("#536157")});
+                workspaceFolders_.push_back({id, name, space, QColor(color).isValid() ? QColor(color).name(QColor::HexRgb) : defaultFolderColor()});
             }
         }
         for (const QJsonValue &value : root.value(QStringLiteral("collapsedFolders")).toArray()) {
@@ -178,7 +178,7 @@ void SpikeWindow::saveSession() const {
         record.insert(QStringLiteral("id"), folder.id);
         record.insert(QStringLiteral("name"), folder.name);
         record.insert(QStringLiteral("space"), folder.space);
-        record.insert(QStringLiteral("color"), QColor(folder.color).isValid() ? QColor(folder.color).name(QColor::HexRgb) : QStringLiteral("#536157"));
+        record.insert(QStringLiteral("color"), QColor(folder.color).isValid() ? QColor(folder.color).name(QColor::HexRgb) : defaultFolderColor());
         folders.append(record);
     }
     QJsonObject spaceIcons;
@@ -339,15 +339,15 @@ void SpikeWindow::synchronizeSession() {
                 const QString prefix = activeView->rendererRecovery == controller::RendererRecoveryState::failed
                     ? QStringLiteral("Die Seite wurde beendet. ")
                     : QString();
-                status_->setText(prefix + QString::fromStdString(*activeView->state.error));
+                showStatus(prefix + QString::fromStdString(*activeView->state.error));
             } else if (activeView->rendererRecovery == controller::RendererRecoveryState::recovering) {
-                status_->setText(L(QStringLiteral("Der Seiteninhalt wird nach einem Absturz neu geladen…")));
+                showStatus(L(QStringLiteral("Der Seiteninhalt wird nach einem Absturz neu geladen…")));
             } else if (activeView->rendererRecovery == controller::RendererRecoveryState::failed) {
-                status_->setText(L(QStringLiteral("Die Seite wurde beendet. Der Seiteninhalt konnte nicht wiederhergestellt werden.")));
+                showStatus(L(QStringLiteral("Die Seite wurde beendet. Der Seiteninhalt konnte nicht wiederhergestellt werden.")));
             } else if (activeView->state.loading) {
-                status_->setText(L(QStringLiteral("Laden…")));
+                showStatus(L(QStringLiteral("Laden…")));
             } else {
-                status_->setText(L(QStringLiteral("Bereit")));
+                showStatus(QString());
             }
         }
     }

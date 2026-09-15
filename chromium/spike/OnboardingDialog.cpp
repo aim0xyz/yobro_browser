@@ -1,4 +1,5 @@
 #include "spike/OnboardingDialog.hpp"
+#include "spike/Theme.hpp"
 
 #include "spike/Localization.hpp"
 #include "spike/OnboardingProgress.hpp"
@@ -21,7 +22,7 @@ QLabel *paragraph(const QString &text, QWidget *parent, int size = 13, bool mute
     auto *label = new QLabel(text, parent);
     label->setWordWrap(true);
     label->setStyleSheet(QStringLiteral("font-size:%1px%2").arg(size).arg(
-        muted ? QStringLiteral(";color:#7c7c7c") : QString()));
+        muted ? QStringLiteral(";color:%1").arg(themePalette(currentAppearanceIsDark()).sheetMuted) : QString()));
     return label;
 }
 
@@ -58,7 +59,7 @@ OnboardingDialog::OnboardingDialog(
     title->setStyleSheet(QStringLiteral("font-size:24px;font-weight:600"));
     counter_ = new QLabel(this);
     counter_->setObjectName(QStringLiteral("onboardingStepLabel"));
-    counter_->setStyleSheet(QStringLiteral("font:11px monospace;color:#7c7c7c"));
+    counter_->setStyleSheet(QStringLiteral("font:11px Menlo;color:%1").arg(themePalette(currentAppearanceIsDark()).sheetMuted));
     header->addWidget(title);
     header->addStretch();
     header->addWidget(counter_);
@@ -88,7 +89,7 @@ OnboardingDialog::OnboardingDialog(
         QStringLiteral("Chrome"), QStringLiteral("Firefox"),
     }).join(QStringLiteral("   ·   ")), welcome);
     sources->setObjectName(QStringLiteral("onboardingSourceList"));
-    sources->setStyleSheet(QStringLiteral("font-size:13px;font-weight:500;color:#536157"));
+    sources->setStyleSheet(QStringLiteral("font-size:13px;font-weight:500;color:%1").arg(themePalette(currentAppearanceIsDark()).sheetMuted));
     welcomeLayout->addWidget(sources);
     welcomeLayout->addWidget(paragraph(L(
         QStringLiteral("YoBro erkennt vorhandene Profile. Du siehst vor dem Import, was verfügbar ist. "
@@ -167,7 +168,7 @@ OnboardingDialog::OnboardingDialog(
     doneLayout->setSpacing(16);
     auto *doneTitle = new QLabel(L(QStringLiteral("Dein YoBro ist bereit"),
                                    QStringLiteral("Your YoBro is ready")), donePage);
-    doneTitle->setStyleSheet(QStringLiteral("font-size:22px;color:#536157"));
+    doneTitle->setStyleSheet(QStringLiteral("font-size:22px;color:%1;font-family:'New York',Georgia,serif;font-weight:500").arg(themePalette(currentAppearanceIsDark()).sheetText));
     doneLayout->addWidget(doneTitle);
     resultLabel_ = new QLabel(donePage);
     resultLabel_->setObjectName(QStringLiteral("onboardingResult"));

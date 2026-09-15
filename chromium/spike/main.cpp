@@ -7,6 +7,10 @@
 #include "spike/SpaceProxyController.hpp"
 #include "spike/SpaceProxyStore.hpp"
 #include "spike/SpikeWindow.hpp"
+#include "spike/Theme.hpp"
+
+#include <QGuiApplication>
+#include <QStyleHints>
 #include "yobro/controller/BrowserSession.hpp"
 #include "yobro/controller/ProtocolV2Controller.hpp"
 #include "yobro/core/ProfilePaths.hpp"
@@ -39,6 +43,10 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationDomain(QStringLiteral("yobro.bro"));
     QCoreApplication::setApplicationName(QStringLiteral("YOBRO Chromium Feasibility"));
     QCoreApplication::setApplicationVersion(QStringLiteral(YOBRO_CHROMIUM_VERSION));
+    // The theme layer is Qt-Core-only; the system appearance probe lives here.
+    yobro::spike::setSystemDarkProbe([] {
+        return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    });
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral(

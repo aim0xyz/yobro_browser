@@ -82,11 +82,10 @@ SpikeWindow::SpikeWindow(
     auto *sidebarLayout = new QVBoxLayout(workspaceSidebar);
     sidebarLayout->setContentsMargins(17, 12, 17, 12);
     sidebarLayout->setSpacing(8);
-    auto *workspaceTitle = new QLabel(QStringLiteral("yobro"), workspaceSidebar);
+    auto *workspaceTitle = new QLabel(QStringLiteral("YoBro"), workspaceSidebar);
     workspaceTitle->setObjectName(QStringLiteral("productBrand"));
-    workspaceTitle->setStyleSheet(QStringLiteral("font-size:29px;font-weight:700;letter-spacing:-1.4px;color:#e3e9e0"));
     auto *previewLabel = new QLabel(QStringLiteral("PREVIEW"), workspaceSidebar);
-    previewLabel->setStyleSheet(QStringLiteral("color:#b9cbb3;font:700 8px monospace;letter-spacing:1.5px"));
+    previewLabel->setObjectName(QStringLiteral("productPreview"));
     auto *brandRow = new QWidget(workspaceSidebar);
     brandRow->setObjectName(QStringLiteral("sidebarBrandRow"));
     auto *brandLayout = new QHBoxLayout(brandRow);
@@ -94,17 +93,15 @@ SpikeWindow::SpikeWindow(
     brandLayout->setSpacing(10);
     auto *brandMark = new QLabel(QStringLiteral("Y"), brandRow);
     brandMark->setObjectName(QStringLiteral("productBrandMark"));
-    brandMark->setStyleSheet(QStringLiteral("font-size:33px;color:#f46a35;font-weight:800;font-family:system-ui"));
     brandLayout->addWidget(brandMark);
     brandLayout->addWidget(workspaceTitle);
     brandLayout->addStretch();
     brandLayout->addWidget(previewLabel, 0, Qt::AlignVCenter);
     sidebarLayout->addWidget(brandRow);
-    auto *sidebarQuickSearch = new QPushButton(L(QStringLiteral("⌕   Suchen oder öffnen                 ⌘ K")), workspaceSidebar);
-    sidebarQuickSearch->setObjectName(QStringLiteral("sidebarQuickSearch"));
-    sidebarQuickSearch->setToolTip(L(QStringLiteral("Adresse öffnen")));
-    sidebarLayout->addWidget(sidebarQuickSearch);
-    auto *sidebarNavigation = new QWidget(userPane);
+    // The WebKit build keeps navigation and the address field inside the
+    // sidebar: the search field is the address editor, and the login and
+    // appearance buttons sit at its trailing edge like the key and shield do.
+    auto *sidebarNavigation = new QWidget(workspaceSidebar);
     sidebarNavigation->setObjectName(QStringLiteral("topNavigation"));
     auto *navigationLayout = new QHBoxLayout(sidebarNavigation);
     navigationLayout->setContentsMargins(3, 0, 3, 0);
@@ -112,9 +109,20 @@ SpikeWindow::SpikeWindow(
     navigationLayout->addWidget(back_);
     navigationLayout->addWidget(forward_);
     navigationLayout->addWidget(reload_);
+    navigationLayout->addStretch();
+    sidebarLayout->insertWidget(0, sidebarNavigation);
+    auto *searchRow = new QWidget(workspaceSidebar);
+    searchRow->setObjectName(QStringLiteral("sidebarSearchRow"));
+    auto *searchRowLayout = new QHBoxLayout(searchRow);
+    searchRowLayout->setContentsMargins(11, 0, 7, 0);
+    searchRowLayout->setSpacing(4);
+    searchRowLayout->addWidget(address_, 1);
+    searchRowLayout->addWidget(loginFillButton_);
+    searchRowLayout->addWidget(appearanceButton_);
+    sidebarLayout->addWidget(searchRow);
     auto *workspaceSection = new QLabel(QStringLiteral("WORKSPACE"), workspaceSidebar);
     workspaceSection->setText(L(QStringLiteral("DEINE TABS")));
-    workspaceSection->setStyleSheet(QStringLiteral("color:#8e988f;font:700 10px monospace;letter-spacing:1.8px;padding:14px 3px 7px"));
+    workspaceSection->setObjectName(QStringLiteral("sidebarSectionLabel"));
     sidebarLayout->addWidget(workspaceSection);
     workspaceTree_ = new QTreeWidget(workspaceSidebar);
     workspaceTree_->setObjectName(QStringLiteral("workspaceTree"));
@@ -130,13 +138,6 @@ SpikeWindow::SpikeWindow(
     workspaceTree_->setDropIndicatorShown(true);
     workspaceTree_->setDragDropMode(QAbstractItemView::InternalMove);
     workspaceTree_->setDefaultDropAction(Qt::MoveAction);
-    workspaceTree_->setStyleSheet(QStringLiteral(
-        "QTreeWidget{background:transparent;border:0;padding:0;color:#e3e9e0;outline:0;}"
-        "QTreeWidget::item{padding:10px 9px;border-radius:11px;margin:2px 0;min-height:24px;}"
-        "QTreeWidget::item:hover{background:#303a33;}"
-        "QTreeWidget::item:selected{background:#39433b;color:#f7faf2;}"
-        "QTreeWidget::branch{background:transparent;}"
-    ));
     sidebarLayout->addWidget(workspaceTree_, 1);
     userLayout->addWidget(workspaceSidebar);
 
@@ -145,16 +146,8 @@ SpikeWindow::SpikeWindow(
     auto *browserLayout = new QVBoxLayout(browserContentHost);
     browserLayout->setContentsMargins(10, 10, 10, 10);
     browserLayout->setSpacing(10);
-    auto *topChrome = new QWidget(browserContentHost);
-    topChrome->setObjectName(QStringLiteral("topChrome"));
-    auto *topChromeLayout = new QHBoxLayout(topChrome);
-    topChromeLayout->setContentsMargins(0, 0, 0, 0);
-    topChromeLayout->setSpacing(10);
-    topChromeLayout->addWidget(sidebarNavigation);
-    topChromeLayout->addWidget(address_, 1);
-    topChromeLayout->addWidget(appearanceButton_);
-    topChromeLayout->addWidget(loginFillButton_);
-    browserLayout->addWidget(topChrome);
+    // No top chrome: the WebKit build has no toolbar row above the content —
+    // navigation and the address editor live in the sidebar.
 
     auto *newNoteButton = new QPushButton(L(QStringLiteral("Neue Notiz"), QStringLiteral("New note")), userPane);
     newNoteButton->setObjectName(QStringLiteral("newNoteButton"));
@@ -236,8 +229,10 @@ SpikeWindow::SpikeWindow(
     folderActionsLayout->addWidget(folderPicker_, 1);
     folderActionsLayout->addWidget(addFolderButton);
     sidebarLayout->addWidget(folderActions);
-    sidebarLayout->insertWidget(4, spaceActions);
-    sidebarLayout->insertWidget(5, folderActions);
+    // WebKit order: space pill and folder row sit between the search field and
+    // the "YOUR TABS" label.
+    sidebarLayout->insertWidget(3, spaceActions);
+    sidebarLayout->insertWidget(4, folderActions);
 
     auto *pageActions = new QWidget(workspaceSidebar);
     pageActions->setObjectName(QStringLiteral("sidebarPageActions"));
@@ -330,8 +325,9 @@ SpikeWindow::SpikeWindow(
     findBar_->hide();
     browserLayout->addWidget(findBar_);
 
-    status_ = new QLabel(L(QStringLiteral("Bereit")), browserContentHost);
+    status_ = new QLabel(QString(), browserContentHost);
     status_->setObjectName(QStringLiteral("browserStatus"));
+    status_->hide();
     browserLayout->addWidget(status_);
     userLayout->addWidget(browserContentHost, 1);
 
@@ -343,7 +339,7 @@ SpikeWindow::SpikeWindow(
     agentLayout->setSpacing(7);
     auto *agentHeader = new QHBoxLayout();
     auto *agentLabel = new QLabel(L(QStringLiteral("AGENT · isolierte Anwendungswelt"), QStringLiteral("AGENT · isolated application world")), agentPane);
-    agentLabel->setStyleSheet(QStringLiteral("color:#ff541c;font:700 11px monospace"));
+    agentLabel->setObjectName(QStringLiteral("agentPaneLabel"));
     libraryAccess_ = new QCheckBox(L(QStringLiteral("Verlauf und Downloads erlauben"), QStringLiteral("Allow history + downloads")), agentPane);
     libraryAccess_->setObjectName(QStringLiteral("libraryAccessToggle"));
     libraryAccess_->setToolTip(QStringLiteral(
@@ -403,7 +399,7 @@ SpikeWindow::SpikeWindow(
         agentPane
     );
     profileStatus_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    profileStatus_->setStyleSheet(QStringLiteral("color:%1;font:10px monospace").arg(themePalette(systemPrefersDark()).textMuted));
+    profileStatus_->setStyleSheet(QStringLiteral("color:%1;font:10px Menlo").arg(themePalette(systemPrefersDark()).textMuted));
     agentLayout->addWidget(profileStatus_);
 
     splitter->addWidget(userPane);
@@ -416,10 +412,6 @@ SpikeWindow::SpikeWindow(
     QObject::connect(newTabButton, &QPushButton::clicked, this, [this] { newUserTab(); });
     QObject::connect(privateTabButton, &QPushButton::clicked, this, [this] { newUserTab({}, true); });
     QObject::connect(libraryButton, &QPushButton::clicked, this, [this] { showLibrary(); });
-    QObject::connect(sidebarQuickSearch, &QPushButton::clicked, this, [this] {
-        address_->setFocus(Qt::ShortcutFocusReason);
-        address_->selectAll();
-    });
     QObject::connect(bookmarkButton, &QPushButton::clicked, this, [this] { bookmarkCurrentPage(); });
     QObject::connect(reopenClosedTabButton_, &QPushButton::clicked, this, [this] { reopenClosedTab(); });
     QObject::connect(addSpaceButton, &QPushButton::clicked, this, [this] { createSpace(); });
@@ -498,10 +490,10 @@ SpikeWindow::SpikeWindow(
         if (problem) {
             const QSignalBlocker blocker(libraryAccess_);
             libraryAccess_->setChecked(session_.protocolState().libraryAccess);
-            status_->setText(QStringLiteral("Library-access policy was not changed: ") + QString::fromStdString(*problem));
+            showStatus(QStringLiteral("Library-access policy was not changed: ") + QString::fromStdString(*problem));
             return;
         }
-        status_->setText(enabled
+        showStatus(enabled
             ? QStringLiteral("Agent history and download-list access enabled for this profile.")
             : QStringLiteral("Agent history and download-list access disabled for this profile."));
     });
@@ -513,13 +505,13 @@ SpikeWindow::SpikeWindow(
         this,
         [this](const QWebEngineExtensionInfo &extension) {
             if (!extension.isLoaded()) {
-                status_->setText(QStringLiteral("Extension install failed: ") + extension.error());
+                showStatus(QStringLiteral("Extension install failed: ") + extension.error());
                 return;
             }
             // Enabling straight from this signal crashes the extension backend,
             // so the profile defers the switch for us.
             profile_->enableExtensionAfterInstall(extension);
-            status_->setText(QStringLiteral("MV3 extension loaded and enabled: ") + extension.name());
+            showStatus(QStringLiteral("MV3 extension loaded and enabled: ") + extension.name());
             QTimer::singleShot(
                 qtwebengine::QtBrowserProfile::installSettleDelayMilliseconds + 50,
                 this,
@@ -613,7 +605,7 @@ SpikeWindow::SpikeWindow(
             dialog.exec();
             if (dialog.clickedButton() != proceed) return false;
             certificates_.accept(host, fingerprint);
-            status_->setText(
+            showStatus(
                 L(QStringLiteral("Zertifikatsausnahme für %1 gilt bis zum Beenden."),
                   QStringLiteral("Certificate exception for %1 applies until you quit."))
                     .arg(host)
@@ -699,7 +691,7 @@ SpikeWindow::SpikeWindow(
         const QString detail = QString::fromStdString(event.detail);
         chat_.append(QStringLiteral("action"), action + QStringLiteral(": ") + detail, QString::fromStdString(event.space));
         if (status_)
-            status_->setText(L(QStringLiteral("Zuletzt: "), QStringLiteral("Last: ")) + action);
+            showStatus(L(QStringLiteral("Zuletzt: "), QStringLiteral("Last: ")) + action);
         refreshAgentActivity();
     });
     // Local development verification only; the session additionally requires
@@ -711,7 +703,7 @@ SpikeWindow::SpikeWindow(
     synchronizeSession();
     updateWebAppearance();
     if (!startupPolicyProblem.isEmpty())
-        status_->setText(startupPolicyProblem);
+        showStatus(startupPolicyProblem);
 }
 
 SpikeWindow::~SpikeWindow() {
@@ -1059,7 +1051,7 @@ void SpikeWindow::setSidebarCompact(bool compact) {
     workspaceSidebar_->setVisible(!compact);
     compactSidebar_->setVisible(compact);
     if (compact) refreshCompactSidebar();
-    status_->setText(compact
+    showStatus(compact
         ? L(QStringLiteral("Seitenleiste eingeklappt. ⌘S klappt sie wieder auf."))
         : L(QStringLiteral("Seitenleiste eingeblendet.")));
 }

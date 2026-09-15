@@ -132,7 +132,7 @@ int main(int argc, char *argv[]) {
             auto *topNavigation = preview.window->findChild<QWidget *>(QStringLiteral("topNavigation"));
             auto *workspaceSidebar = preview.window->findChild<QWidget *>(QStringLiteral("workspaceSidebar"));
             auto *topAddress = preview.window->findChild<QLineEdit *>(QStringLiteral("topAddress"));
-            check(productShell != nullptr && brand != nullptr && brand->text() == QStringLiteral("yobro")
+            check(productShell != nullptr && brand != nullptr && brand->text() == QStringLiteral("YoBro")
                   && topNavigation != nullptr && workspaceSidebar != nullptr
                   && workspaceSidebar->minimumWidth() == 248 && workspaceSidebar->maximumWidth() == 248
                   && topAddress != nullptr,

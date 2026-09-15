@@ -43,7 +43,7 @@ void SpikeWindow::createFolder() {
     const QString name = QInputDialog::getText(this, L(QStringLiteral("Neuer Ordner")), L(QStringLiteral("Name")), QLineEdit::Normal, {}, &accepted).trimmed();
     if (!accepted || name.isEmpty() || name.size() > 60) return;
     const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    workspaceFolders_.push_back({.id = id, .name = name, .space = activeSpace_, .color = QStringLiteral("#536157")});
+    workspaceFolders_.push_back({.id = id, .name = name, .space = activeSpace_, .color = defaultFolderColor()});
     switchSpace(activeSpace_);
 }
 
@@ -62,7 +62,7 @@ void SpikeWindow::renameSpace(const QString &space) {
     if (spaceIcons_.contains(space)) spaceIcons_.insert(name, spaceIcons_.take(space));
     // The proxy follows the rename, otherwise the space would silently lose it.
     if (const QString problem = proxies_.rename(space, name); !problem.isEmpty())
-        status_->setText(problem);
+        showStatus(problem);
     // So does the conversation, otherwise the chat history would look empty
     // after a rename.
     if (chatRunner_) chatRunner_->cancel();
@@ -233,16 +233,16 @@ void SpikeWindow::refreshWorkspaceSidebar() {
     spaceItem->setFlags(spaceItem->flags() & ~(Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled));
     spaceItem->setExpanded(true);
     spaceItem->setSizeHint(0, QSize(0, 46));
-    spaceItem->setForeground(0, QColor(QStringLiteral("#e3e9e0")));
-    spaceItem->setBackground(0, QColor(QStringLiteral("#29352d")));
+    // Item text and washes come from the window style sheet so both
+    // appearances stay correct; only folder colours are data-driven.
     spaceItem->setFont(0, QFont(spaceItem->font(0).family(), -1, QFont::DemiBold));
 
-    auto addGroup = [spaceItem, this](const QString &label, const QString &name, const QString &folderId = {}, const QString &color = QStringLiteral("#536157")) {
+    auto addGroup = [spaceItem, this](const QString &label, const QString &name, const QString &folderId = {}, const QString &color = defaultFolderColor()) {
         auto *group = new QTreeWidgetItem(spaceItem, {label});
         group->setData(0, Qt::UserRole + 2, name);
         group->setData(0, Qt::UserRole + 3, folderId);
         group->setFlags((group->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled)) | Qt::ItemIsDropEnabled);
-        group->setForeground(0, QColor(QColor(color).isValid() ? color : QStringLiteral("#aab7a6")));
+        group->setForeground(0, QColor(QColor(color).isValid() ? color : themePalette(currentAppearanceIsDark()).textMuted));
         group->setFont(0, QFont(group->font(0).family(), -1, QFont::DemiBold));
         group->setSizeHint(0, QSize(0, 31));
         group->setExpanded(!collapsedFolderIds_.contains(folderId));
@@ -295,7 +295,6 @@ void SpikeWindow::refreshWorkspaceSidebar() {
         item->setFlags((item->flags() & ~Qt::ItemIsDropEnabled) | Qt::ItemIsDragEnabled);
         if (!tab.privatePage && !favicon.isNull()) item->setIcon(0, favicon);
         item->setSizeHint(0, QSize(0, 44));
-        item->setForeground(0, QColor(QStringLiteral("#e3e9e0")));
         item->setData(0, Qt::UserRole, QString::fromStdString(tab.state.id));
         item->setData(0, Qt::UserRole + 1, tabSpace);
         item->setToolTip(0, QString::fromStdString(tab.state.url));
@@ -325,7 +324,6 @@ void SpikeWindow::refreshWorkspaceSidebar() {
         auto *item = new QTreeWidgetItem(group, {QStringLiteral("✎  ") + note.editor->displayTitle().left(38)});
         item->setFlags((item->flags() & ~Qt::ItemIsDropEnabled) | Qt::ItemIsDragEnabled);
         item->setSizeHint(0, QSize(0, 44));
-        item->setForeground(0, QColor(QStringLiteral("#e3e9e0")));
         item->setData(0, Qt::UserRole, note.id);
         item->setData(0, Qt::UserRole + 1, noteSpace);
         item->setToolTip(0, L(QStringLiteral("Notiz: "), QStringLiteral("Note: ")) + note.editor->displayTitle());

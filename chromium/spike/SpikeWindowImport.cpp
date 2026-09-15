@@ -243,10 +243,10 @@ void SpikeWindow::commitBrowserImport() {
     QString problem;
     const QStringList summary = applyImportedBrowserData(data, &problem);
     if (!problem.isEmpty()) {
-        status_->setText(problem);
+        showStatus(problem);
         return;
     }
-    status_->setText(summary.join(QStringLiteral(" ")));
+    showStatus(summary.join(QStringLiteral(" ")));
     if (browserImportPreview_) browserImportPreview_->setText(summary.join(QStringLiteral("\n")));
     browserImportData_.reset();
     if (browserImportCommit_) browserImportCommit_->setEnabled(false);
@@ -417,13 +417,13 @@ void SpikeWindow::commitWebKitImport() {
             }
         }
         saveSession();
-        status_->setText(L(QStringLiteral("Import abgeschlossen: %1 neue Verlaufseinträge, %2 Lesezeichen, %3 Tabs geöffnet."))
+        showStatus(L(QStringLiteral("Import abgeschlossen: %1 neue Verlaufseinträge, %2 Lesezeichen, %3 Tabs geöffnet."))
             .arg(addedHistory).arg(addedBookmarks).arg(openedTabs));
         importDialog_->accept();
     } catch (const std::exception &error) {
         if (importPreview_) importPreview_->setText(QStringLiteral("Import fehlgeschlagen: ") + QString::fromUtf8(error.what()));
         if (commitImport_) commitImport_->setEnabled(false);
-        status_->setText(L(QStringLiteral("WebKit-Import fehlgeschlagen.")));
+        showStatus(L(QStringLiteral("WebKit-Import fehlgeschlagen.")));
     }
 }
 

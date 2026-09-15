@@ -1,6 +1,6 @@
 # Chromium-Fortschritt
 
-**Zuletzt aktualisiert:** 15. September 2026  
+**Zuletzt aktualisiert:** 16. September 2026  
 **Aktueller Stand:** Technische Engine-Grundlagen weit fortgeschritten, Produktoberfläche in früher Preview. Die Chromium-Version hat **noch nicht** den Funktionsumfang der WebKit-App.  
 **Testbare App (aktuellster Stand):** `chromium/build/YOBRO Chromium Feasibility.app`  
 **Zuletzt gepackte App:** `dist/chromium-macos-arm64/YOBRO Chromium Feasibility.app` (älter als der aktuelle Quellstand)
@@ -26,10 +26,20 @@ Die bestandenen Tests belegen Engine-, Sicherheits- und Protokollverhalten. Sie 
   User-Tabs werden kontrolliert wiederhergestellt; Agent-Tabs bleiben fail-closed. Crash- und Prozess-Tests sind abgeschlossen.
 
 - [ ] **3. Downloads — Abschlussprüfung läuft**  
-  Download-Bibliothek, User-/Private-/Agent-Downloads, Abbruch, Fehler, Neustart, Kollisionen, Cleanup und Shutdown sind implementiert. Die Gesamtsuite besteht **38/38 Tests** (Stand 15. September 2026), inklusive eines echten Downloads. Offen sind der abschließende unabhängige Review und die Gate-Dokumentation. Die Lifetime-Warnung `Release of profile requested but WebEnginePage still not deleted` ist geklärt und behoben: sie war kein Testartefakt, sondern ein echter Besitzfehler. `QtBrowserLibrary` hält für einen ausdrücklichen Agenten-Download eigene `QWebEnginePage`-Objekte und behielt bis zu acht davon zurück, um eine spät eintreffende Download-Anfrage noch zuordnen zu können — die Anwendung gibt aber unmittelbar nach `shutdownDownloads()` die Sitzung und damit das Profil frei, also überlebten diese Seiten ihr Profil. `shutdownDownloads()` gibt sie jetzt alle frei (nach dem Herunterfahren wird eine späte Anfrage ohnehin abgelehnt), das neue `retainedNativePages()` macht das prüfbar, und `chromium-download-lifecycle` fängt die Qt-Warnung jetzt über einen eigenen Message-Handler ab und schlägt fehl, wenn sie wieder auftritt — eine Warnung, an der niemand scheitert, behebt niemand.
+  Download-Bibliothek, User-/Private-/Agent-Downloads, Abbruch, Fehler, Neustart, Kollisionen, Cleanup und Shutdown sind implementiert. Die Gesamtsuite besteht **39/39 Tests** (Stand 16. September 2026, mit dem neuen Theme-Gleichzugstest), inklusive eines echten Downloads. Offen sind der abschließende unabhängige Review und die Gate-Dokumentation. Die Lifetime-Warnung `Release of profile requested but WebEnginePage still not deleted` ist geklärt und behoben: sie war kein Testartefakt, sondern ein echter Besitzfehler. `QtBrowserLibrary` hält für einen ausdrücklichen Agenten-Download eigene `QWebEnginePage`-Objekte und behielt bis zu acht davon zurück, um eine spät eintreffende Download-Anfrage noch zuordnen zu können — die Anwendung gibt aber unmittelbar nach `shutdownDownloads()` die Sitzung und damit das Profil frei, also überlebten diese Seiten ihr Profil. `shutdownDownloads()` gibt sie jetzt alle frei (nach dem Herunterfahren wird eine späte Anfrage ohnehin abgelehnt), das neue `retainedNativePages()` macht das prüfbar, und `chromium-download-lifecycle` fängt die Qt-Warnung jetzt über einen eigenen Message-Handler ab und schlägt fehl, wenn sie wieder auftritt — eine Warnung, an der niemand scheitert, behebt niemand.
 
 - [ ] **4. Sichtbare WebKit-Produktoberfläche — in Arbeit**  
   **Aktueller Schwerpunkt.** Sidebar, Tabs, Toolbar, Bibliothek, Einstellungen, Onboarding und weitere WebKit-Oberflächen werden auf Chromium übertragen.
+
+  Bereits übertragen (Teilschritt „Design-Fundament“, 16. September 2026):
+  - Design-Tokens: `Theme.cpp` trägt jetzt die exakte WebKit-Palette aus `Sources/YOBRO/Theme.swift` (ink, moss, paper, surface, chrome-Gradient, sage/lilac/peach, alle sieben Ordnerfarben, field, border, brandOrange) in Hell und Dunkel, dazu die Deckkraft-Mischungen, die die WebKit-Views mit `.opacity()` bauen. Der neue Test `chromium-theme-tokens` liest beide Dateien und schlägt fehl, sobald sie auseinanderlaufen; dasselbe verbietet Hex-Farbliterale außerhalb der Theme-Schicht — 18 Tokens im Gleichzug, die Spike-Dateien sind hex-frei (die HTML-Startseite bleibt als eigenes Meilenstein-Thema offen).
+  - Shell-Struktur: die WebKit-App hat keine Toolbar über dem Inhalt — Zurück/Vor/Neu-laden und das Adressfeld sind jetzt in die Sidebar umgezogen (Suchfeld mit Schlüssel- und Darstellungsknopf wie in WebKit), die frühere obere Leiste und die permanente Statuszeile sind weg. Transiente Meldungen erscheinen für sechs Sekunden („showStatus“), Text bleibt für Tests lesbar.
+  - Das ganze Fenster liegt auf dem chromTop→chromeBottom-Gradient; der Arbeitsbereich liegt als Papier-Karte mit Haarlinien-Rand (Radius 14) darauf, wie in der WebKit-Shell.
+  - Der Hellmodus ist repariert: das Tree-Stylesheet und die Baum-Item-Farben waren fest dunkel hartcodiert, sämtliche ~20 Inline-Hex-Stile (Brand, Abschnittslabels, Bibliothek, Downloads, Onboarding, Logins, Mail, Assistent) nutzen jetzt die Palette.
+  - Typografie: Markenwortmarke „YoBro“ in SF Pro Rounded 600 mit −1,4 px Laufweite, editoriale Titel in New York (Georgia-Rückfall), Micro-Caps in SF Mono/Menlo; die fehlende Schriftfamilie „Monospace“ wurde ersetzt.
+  - Neue Ordner erhalten Moosgrün (WebKit-Standard) statt des alten Graus.
+  - `YOBRO_TEST_APPEARANCE=light|dark` pinnt die Erscheinung für Goldene-Referenz-Aufnahmen, ohne die Systemeinstellung zu berühren; die WebKit-Referenzaufnahmen (hell/dunkel) und die Chromium-Gegenstücke liegen unter `.runtime-refcap/`.
+  - Bekannte Lücken dieses Teilschritts: Icons sind weiterhin Text-Glyphen statt SF-Symbol-Ersatz, die HTML-Startseite zeigt noch das alte Dunkeldesign, und die Action-Zeilen in der Sidebar laufen bei langen deutschen Labels noch über. Alles Folgestufen desselben Meilensteins.
 
   Bereits übertragen (Teilschritt „Tabs, Navigation, Bedienung“):
   - Tastenkürzel ⌘T, ⇧⌘N, ⌘W, ⌘L, ⌘R, ⌘D, ⌘S, ⇧⌘S, ⌘K, ⌘F, ⌘G, ⇧⌘G, ⌘Y, ⇧⌘J, ⇧⌘T, ⇧⌘A, ⌘, und Escape

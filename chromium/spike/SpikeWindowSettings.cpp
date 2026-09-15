@@ -279,7 +279,7 @@ void SpikeWindow::showSettings() {
         config.matchDomains = splitDomains(proxyMatch->text());
         config.excludedDomains = splitDomains(proxyExcluded->text());
         if (const QString problem = proxies_.set(activeSpace_, config); !problem.isEmpty()) {
-            status_->setText(problem);
+            showStatus(problem);
             return;
         }
         proxyPassword->clear();
@@ -287,13 +287,13 @@ void SpikeWindow::showSettings() {
     });
     QObject::connect(proxyRemove, &QPushButton::clicked, dialog, [this, proxyEnabled, proxyHost] {
         if (const QString problem = proxies_.remove(activeSpace_); !problem.isEmpty()) {
-            status_->setText(problem);
+            showStatus(problem);
             return;
         }
         proxyEnabled->setChecked(false);
         proxyHost->clear();
         applySpaceProxy();
-        status_->setText(
+        showStatus(
             L(QStringLiteral("Proxy für „%1“ entfernt."), QStringLiteral("Proxy for “%1” removed."))
                 .arg(activeSpace_)
         );
@@ -332,7 +332,7 @@ void SpikeWindow::showSettings() {
         adBlock_.setEnabled(checked);
         strictToggle->setEnabled(checked);
         updateAdBlocking(true);
-        status_->setText(checked
+        showStatus(checked
             ? L(QStringLiteral("Werbefilter aktiv. Offene Seiten werden neu geladen."),
                 QStringLiteral("Ad filter active. Open pages are reloaded."))
             : L(QStringLiteral("Werbefilter aus. Offene Seiten werden neu geladen."),
@@ -341,7 +341,7 @@ void SpikeWindow::showSettings() {
     QObject::connect(strictToggle, &QCheckBox::toggled, dialog, [this](bool checked) {
         adBlock_.setStrictProtection(checked);
         updateAdBlocking(true);
-        status_->setText(checked
+        showStatus(checked
             ? L(QStringLiteral("Strikter Schutz aktiv, keine Wiedergabe-Manipulation."),
                 QStringLiteral("Strict protection active, no playback manipulation."))
             : L(QStringLiteral("Zusätzliche Seitenfilter aktiv."),
@@ -362,7 +362,7 @@ void SpikeWindow::showSettings() {
     layout->addLayout(cookieRow);
     QObject::connect(cookiePolicy, &QComboBox::currentIndexChanged, dialog, [this](int index) {
         privacy_.setCookieRetention(index == 1 ? CookieRetention::sessionOnly : CookieRetention::keep);
-        status_->setText(index == 1
+        showStatus(index == 1
             ? L(QStringLiteral("Cookies werden beim Beenden gelöscht. Wirkt ab dem nächsten Start."),
                 QStringLiteral("Cookies are deleted when quitting. Takes effect on the next start."))
             : L(QStringLiteral("Cookies bleiben erhalten. Wirkt ab dem nächsten Start."),
@@ -503,7 +503,7 @@ void SpikeWindow::showSettings() {
     QObject::connect(newProfile, &QPushButton::clicked, dialog, [this] { createProfile(); });
     QObject::connect(agentPaused, &QCheckBox::toggled, dialog, [this](bool paused) {
         session_.setAgentEnabled(!paused);
-        status_->setText(paused
+        showStatus(paused
             ? L(QStringLiteral("Agentenzugriff pausiert."))
             : L(QStringLiteral("Agentenzugriff aktiv.")));
     });
@@ -515,7 +515,7 @@ void SpikeWindow::showSettings() {
         if (problem) {
             const QSignalBlocker blocker(libraryToggle);
             libraryToggle->setChecked(session_.protocolState().libraryAccess);
-            status_->setText(QStringLiteral("Library-Richtlinie unverändert: ") + QString::fromStdString(*problem));
+            showStatus(QStringLiteral("Library-Richtlinie unverändert: ") + QString::fromStdString(*problem));
             return;
         }
         synchronizeSession();

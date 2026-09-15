@@ -27,9 +27,9 @@ void SpikeWindow::showDownloads() {
     layout->setSpacing(14);
     auto *header = new QHBoxLayout();
     auto *mark = new QLabel(QStringLiteral("◉"), dialog);
-    mark->setStyleSheet(QStringLiteral("font-size:28px;color:#b96b46"));
+    mark->setStyleSheet(QStringLiteral("font-size:26px;color:%1").arg(themePalette(currentAppearanceIsDark()).brandOrange));
     auto *title = new QLabel(L(QStringLiteral("Deine Bibliothek")), dialog);
-    title->setStyleSheet(QStringLiteral("font:500 28px Georgia,serif;color:%1").arg(themePalette(systemPrefersDark()).sheetText));
+    title->setStyleSheet(QStringLiteral("font:500 28px 'New York',Georgia,serif;color:%1").arg(themePalette(currentAppearanceIsDark()).sheetText));
     auto *close = new QPushButton(QStringLiteral("×"), dialog);
     close->setObjectName(QStringLiteral("closeLibraryButton"));
     close->setToolTip(L(QStringLiteral("Bibliothek schließen")));
@@ -47,12 +47,12 @@ void SpikeWindow::showDownloads() {
     historySegment->setObjectName(QStringLiteral("libraryHistorySegment"));
     auto *downloadsSegment = new QPushButton(L(QStringLiteral("⇩  Downloads")), segment);
     downloadsSegment->setObjectName(QStringLiteral("libraryDownloadsSegment"));
-    downloadsSegment->setStyleSheet(QStringLiteral("background:#ffffff"));
+    downloadsSegment->setStyleSheet(QStringLiteral("background:%1;border-radius:9px").arg(themePalette(currentAppearanceIsDark()).sheetSurface));
     segmentLayout->addWidget(historySegment, 1);
     segmentLayout->addWidget(downloadsSegment, 1);
     layout->addWidget(segment);
     auto *section = new QLabel(QStringLiteral("Downloads"), dialog);
-    section->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;letter-spacing:1px").arg(themePalette(systemPrefersDark()).sheetMuted));
+    section->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;letter-spacing:1px").arg(themePalette(currentAppearanceIsDark()).sheetMuted));
     layout->addWidget(section);
 
     downloadsList_ = new QListWidget(dialog);
@@ -69,7 +69,7 @@ void SpikeWindow::showDownloads() {
     );
     downloadsEmptyDetail_->setAlignment(Qt::AlignCenter);
     downloadsEmptyDetail_->setWordWrap(true);
-    downloadsEmptyDetail_->setStyleSheet(QStringLiteral("color:%1").arg(themePalette(systemPrefersDark()).sheetMuted));
+    downloadsEmptyDetail_->setStyleSheet(QStringLiteral("color:%1").arg(themePalette(currentAppearanceIsDark()).sheetMuted));
     layout->addWidget(downloadsEmptyDetail_);
 
     auto *actions = new QHBoxLayout();

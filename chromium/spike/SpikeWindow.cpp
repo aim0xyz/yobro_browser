@@ -159,7 +159,7 @@ void SpikeWindow::reopenClosedTab() {
     switchSpace(closed.space);
     ++closedTabUndoToken_;
     updateClosedTabAction();
-    status_->setText(L(QStringLiteral("Geschlossener Tab wiederhergestellt.")));
+    showStatus(L(QStringLiteral("Geschlossener Tab wiederhergestellt.")));
 }
 
 void SpikeWindow::closeUserTab(int index) {
@@ -181,7 +181,7 @@ void SpikeWindow::closeUserTab(int index) {
     }
     if (session_.userPages().empty()) newUserTab();
     saveSession();
-    status_->setText(closedTabs_.empty() ? L(QStringLiteral("Bereit")) : L(QStringLiteral("Tab geschlossen. Rückgängig ist sechs Sekunden hervorgehoben.")));
+    showStatus(closedTabs_.empty() ? L(QStringLiteral("Bereit")) : L(QStringLiteral("Tab geschlossen. Rückgängig ist sechs Sekunden hervorgehoben.")));
 }
 
 void SpikeWindow::navigateCurrent() {
@@ -190,7 +190,7 @@ void SpikeWindow::navigateCurrent() {
         return;
     // A space that wants a proxy must not fall back to a direct connection.
     if (!proxyIsolationFailure_.isEmpty()) {
-        status_->setText(proxyIsolationFailure_);
+        showStatus(proxyIsolationFailure_);
         return;
     }
     const QString input = address_->text().trimmed();
@@ -206,7 +206,7 @@ void SpikeWindow::navigateCurrent() {
         target = QUrl::fromUserInput(input);
     }
     if (!target.isValid() || (target.scheme() != QStringLiteral("http") && target.scheme() != QStringLiteral("https"))) {
-        status_->setText(L(QStringLiteral("Nur gültige HTTP- und HTTPS-Adressen werden unterstützt."), QStringLiteral("Only valid HTTP and HTTPS addresses are supported.")));
+        showStatus(L(QStringLiteral("Nur gültige HTTP- und HTTPS-Adressen werden unterstützt."), QStringLiteral("Only valid HTTP and HTTPS addresses are supported.")));
         return;
     }
     (void)session_.navigateUserTab(page->state().id, target.toString().toStdString());
@@ -217,7 +217,7 @@ void SpikeWindow::sendCurrentToAgent() {
     if (!page)
         return;
     if (page->profile()->isOffTheRecord()) {
-        status_->setText(L(QStringLiteral("Adressen aus privaten Tabs werden nicht in den dauerhaften Agentenkontext übernommen."), QStringLiteral("Private-tab URLs are not copied into the persistent agent context.")));
+        showStatus(L(QStringLiteral("Adressen aus privaten Tabs werden nicht in den dauerhaften Agentenkontext übernommen."), QStringLiteral("Private-tab URLs are not copied into the persistent agent context.")));
         return;
     }
     const QString url = QString::fromStdString(page->state().url);
@@ -226,7 +226,7 @@ void SpikeWindow::sendCurrentToAgent() {
         (void)agent->navigate(url.toStdString());
         synchronizeSession();
     } else {
-        status_->setText(L(QStringLiteral("Dieser Tab enthält keine Webadresse."), QStringLiteral("The current tab does not contain a web URL.")));
+        showStatus(L(QStringLiteral("Dieser Tab enthält keine Webadresse."), QStringLiteral("The current tab does not contain a web URL.")));
     }
 }
 
@@ -254,7 +254,7 @@ void SpikeWindow::installUnpackedExtension() {
     );
     if (directory.isEmpty())
         return;
-    status_->setText(L(QStringLiteral("MV3-Erweiterung wird installiert…"), QStringLiteral("Installing MV3 extension…")));
+    showStatus(L(QStringLiteral("MV3-Erweiterung wird installiert…"), QStringLiteral("Installing MV3 extension…")));
     profile_->persistentProfile()->extensionManager()->installExtension(directory);
 }
 
@@ -283,7 +283,7 @@ NoteEditor *SpikeWindow::newNote(const QString &title, const QString &html) {
     editor->focusContent();
     refreshWorkspaceSidebar();
     saveSession();
-    status_->setText(L(QStringLiteral("Neue Notiz erstellt."), QStringLiteral("New note created.")));
+    showStatus(L(QStringLiteral("Neue Notiz erstellt."), QStringLiteral("New note created.")));
     return editor;
 }
 
@@ -325,7 +325,7 @@ void SpikeWindow::closeNote(const QString &id) {
     editor->deleteLater();
     refreshWorkspaceSidebar();
     saveSession();
-    status_->setText(L(QStringLiteral("Notiz geschlossen."), QStringLiteral("Note closed.")));
+    showStatus(L(QStringLiteral("Notiz geschlossen."), QStringLiteral("Note closed.")));
 }
 
 
@@ -346,7 +346,7 @@ void SpikeWindow::changeZoom(int direction) {
         direction == 0 ? PageZoomStore::standard : page->view()->zoomFactor()
     );
     page->view()->setZoomFactor(factor);
-    status_->setText(QStringLiteral("Zoom %1 %").arg(static_cast<int>(factor * 100 + 0.5)));
+    showStatus(QStringLiteral("Zoom %1 %").arg(static_cast<int>(factor * 100 + 0.5)));
 }
 
 void SpikeWindow::applyStoredZoom() {
@@ -362,20 +362,20 @@ void SpikeWindow::applyStoredZoom() {
 void SpikeWindow::printActivePage() {
     auto *page = currentUserPage();
     if (!page || page->state().url.empty()) {
-        status_->setText(L(QStringLiteral("Diese Seite kann nicht gedruckt werden.")));
+        showStatus(L(QStringLiteral("Diese Seite kann nicht gedruckt werden.")));
         return;
     }
     auto printer = std::make_shared<QPrinter>(QPrinter::HighResolution);
     QPrintDialog dialog(printer.get(), this);
     dialog.setWindowTitle(L(QStringLiteral("Seite drucken")));
     if (dialog.exec() != QDialog::Accepted) return;
-    status_->setText(L(QStringLiteral("Seite wird gedruckt…")));
+    showStatus(L(QStringLiteral("Seite wird gedruckt…")));
     QPointer<SpikeWindow> guard(this);
     // Chromium renders asynchronously; the printer must outlive that callback.
     page->view()->print(printer.get());
     QObject::connect(page->view(), &QWebEngineView::printFinished, this, [this, guard, printer](bool success) {
         if (!guard) return;
-        status_->setText(success
+        showStatus(success
             ? L(QStringLiteral("Seite gedruckt."))
             : L(QStringLiteral("Drucken wurde abgebrochen oder ist fehlgeschlagen.")));
     });
@@ -393,7 +393,7 @@ void SpikeWindow::copyCurrentAddress() {
     auto *page = currentUserPage();
     if (!page || page->state().url.empty()) return;
     QGuiApplication::clipboard()->setText(QString::fromStdString(page->state().url));
-    status_->setText(L(QStringLiteral("Adresse kopiert.")));
+    showStatus(L(QStringLiteral("Adresse kopiert.")));
 }
 
 
@@ -514,7 +514,7 @@ void SpikeWindow::clearBrowsingData(int rangeIndex, bool includeHistory) {
             );
             refreshLibrary();
         } catch (const std::exception &error) {
-            status_->setText(QString::fromUtf8(error.what()));
+            showStatus(QString::fromUtf8(error.what()));
             return;
         }
     }
@@ -530,11 +530,24 @@ void SpikeWindow::clearBrowsingData(int rangeIndex, bool includeHistory) {
         if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0)
             (void)session_.reloadUserTab(page->state().id);
     }
-    status_->setText(summary);
+    showStatus(summary);
+}
+
+void SpikeWindow::showStatus(const QString &text) {
+    // The WebKit build has no permanent status bar; the line appears for a few
+    // seconds and gets out of the way. Text stays readable for tests.
+    if (!statusHideTimer_) {
+        statusHideTimer_ = new QTimer(this);
+        statusHideTimer_->setSingleShot(true);
+        QObject::connect(statusHideTimer_, &QTimer::timeout, status_, &QLabel::hide);
+    }
+    status_->setText(text);
+    status_->setVisible(!text.isEmpty());
+    statusHideTimer_->start(6000);
 }
 
 bool SpikeWindow::systemPrefersDark() const {
-    return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    return currentAppearanceIsDark();
 }
 
 std::string SpikeWindow::currentHost() const {
@@ -549,7 +562,7 @@ void SpikeWindow::installWebAppearanceScript() {
     for (const QString &name : {QStringLiteral(":/yobro/DarkReader.js"), QStringLiteral(":/yobro/WebAppearance.js")}) {
         QFile file(name);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            status_->setText(L(QStringLiteral("Webseiten-Darstellung ist nicht verfügbar: Skriptressource fehlt.")));
+            showStatus(L(QStringLiteral("Webseiten-Darstellung ist nicht verfügbar: Skriptressource fehlt.")));
             return;
         }
         source += QString::fromUtf8(file.readAll()) + QStringLiteral("\n");
@@ -586,7 +599,7 @@ void SpikeWindow::applySpaceProxy() {
                 QStringLiteral("Der Proxy für „%1“ kann nicht verwendet werden: %2"),
                 QStringLiteral("The proxy for “%1” cannot be used: %2")
             ).arg(activeSpace_, problem);
-            status_->setText(proxyIsolationFailure_);
+            showStatus(proxyIsolationFailure_);
             return;
         }
     }
@@ -603,7 +616,7 @@ void SpikeWindow::applySpaceProxy() {
                 QStringLiteral("“%1” should run without a proxy, but one is still active (%2). "
                                "A restart removes it."))
                   .arg(activeSpace_, SpaceProxyController::appliedLabel());
-        status_->setText(proxyIsolationFailure_);
+        showStatus(proxyIsolationFailure_);
         return;
     }
 
@@ -617,7 +630,7 @@ void SpikeWindow::applySpaceProxy() {
             QStringLiteral("Custom domain lists have no effect here: more goes through the proxy, never less.")
         );
     }
-    status_->setText(message);
+    showStatus(message);
 }
 
 void SpikeWindow::installAdBlockScripts() {
@@ -643,7 +656,7 @@ void SpikeWindow::installAdBlockScripts() {
 
     QFile isolatedFile(QStringLiteral(":/yobro/AdBlocker.js"));
     if (!isolatedFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Werbefilter ist nicht verfügbar: Skriptressource fehlt."),
             QStringLiteral("The ad filter is unavailable: script resource is missing.")
         ));
@@ -733,7 +746,7 @@ void SpikeWindow::showAppearanceMenu() {
     connect(toggle, &QAction::triggered, this, [this](bool checked) {
         appearance_.setEnabled(checked);
         updateWebAppearance();
-        status_->setText(checked
+        showStatus(checked
             ? L(QStringLiteral("Helle Websites werden abgedunkelt, sobald das System dunkel ist."))
             : L(QStringLiteral("Websites behalten ihre eigenen Farben.")));
     });
@@ -782,19 +795,19 @@ void SpikeWindow::toggleSplitView() {
         break;
     }
     if (partner.empty()) {
-        status_->setText(L(QStringLiteral("Split View benötigt einen zweiten Tab in diesem Space.")));
+        showStatus(L(QStringLiteral("Split View benötigt einen zweiten Tab in diesem Space.")));
         return;
     }
     splitPageId_ = partner;
     synchronizeSession();
-    status_->setText(L(QStringLiteral("Split View aktiv. ⇧⌘S beendet die Teilung.")));
+    showStatus(L(QStringLiteral("Split View aktiv. ⇧⌘S beendet die Teilung.")));
 }
 
 void SpikeWindow::clearSplitView() {
     if (splitPageId_.empty()) return;
     splitPageId_.clear();
     synchronizeSession();
-    status_->setText(L(QStringLiteral("Split View beendet.")));
+    showStatus(L(QStringLiteral("Split View beendet.")));
 }
 
 
@@ -804,7 +817,7 @@ void SpikeWindow::duplicateCurrentTab() {
     const auto state = page->state();
     const QString url = QString::fromStdString(state.url);
     if (!url.startsWith(QStringLiteral("http://")) && !url.startsWith(QStringLiteral("https://"))) {
-        status_->setText(L(QStringLiteral("Nur Webseiten können dupliziert werden.")));
+        showStatus(L(QStringLiteral("Nur Webseiten können dupliziert werden.")));
         return;
     }
     // Duplicating reloads the URL in a new tab; in-page state is not cloned.
@@ -821,7 +834,7 @@ void SpikeWindow::duplicateCurrentTab() {
     (void)session_.setActiveUserTab(copy->state().id);
     synchronizeSession();
     saveSession();
-    status_->setText(L(QStringLiteral("Tab dupliziert.")));
+    showStatus(L(QStringLiteral("Tab dupliziert.")));
 }
 
 void SpikeWindow::refreshAgentActivity() {

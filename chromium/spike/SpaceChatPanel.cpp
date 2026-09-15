@@ -1,4 +1,5 @@
 #include "spike/SpaceChatPanel.hpp"
+#include "spike/Theme.hpp"
 
 #include "spike/Localization.hpp"
 
@@ -43,7 +44,7 @@ SpaceChatPanel::SpaceChatPanel(
     auto *header = new QHBoxLayout();
     heading_ = new QLabel(this);
     heading_->setObjectName(QStringLiteral("spaceChatHeading"));
-    heading_->setStyleSheet(QStringLiteral("font:700 11px monospace"));
+    heading_->setStyleSheet(QStringLiteral("font:700 11px Menlo"));
     newChatButton_ = new QPushButton(L(QStringLiteral("Neuer Chat"), QStringLiteral("New chat")), this);
     newChatButton_->setObjectName(QStringLiteral("spaceChatNewButton"));
     connectionButton_ = new QPushButton(L(QStringLiteral("Verbindung"), QStringLiteral("Connection")), this);
@@ -277,8 +278,8 @@ void SpaceChatPanel::showConnection(bool visible) {
 void SpaceChatPanel::setStatus(const QString &text, bool isProblem) {
     status_->setText(text);
     status_->setStyleSheet(isProblem
-        ? QStringLiteral("color:#ff541c;font:10px monospace")
-        : QStringLiteral("font:10px monospace"));
+        ? QStringLiteral("color:%1;font:10px Menlo").arg(themePalette(currentAppearanceIsDark()).brandOrange)
+        : QStringLiteral("font:10px Menlo"));
 }
 
 } // namespace yobro::spike

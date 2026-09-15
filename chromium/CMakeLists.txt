@@ -64,6 +64,12 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 if(BUILD_TESTING)
+    add_test(
+        NAME chromium-theme-tokens
+        COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/ThemeTokenConformance.py"
+    )
+    set_tests_properties(chromium-theme-tokens PROPERTIES TIMEOUT 30)
+
     add_executable(yobro-webkit-import-tests
         tests/core/WebKitImportTests.cpp
     )

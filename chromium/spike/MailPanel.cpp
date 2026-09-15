@@ -1,4 +1,5 @@
 #include "spike/MailPanel.hpp"
+#include "spike/Theme.hpp"
 
 #include "spike/Localization.hpp"
 #include "spike/MailDiscovery.hpp"
@@ -688,8 +689,8 @@ void MailPanel::showAccountForm() {
 void MailPanel::setStatus(const QString &text, bool isProblem) {
     status_->setText(text);
     status_->setStyleSheet(isProblem
-        ? QStringLiteral("color:#ff541c;font:10px monospace")
-        : QStringLiteral("font:10px monospace"));
+        ? QStringLiteral("color:%1;font:10px Menlo").arg(themePalette(currentAppearanceIsDark()).brandOrange)
+        : QStringLiteral("font:10px Menlo"));
 }
 
 } // namespace yobro::spike

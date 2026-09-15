@@ -7,14 +7,14 @@ using namespace windowSupport;
 bool SpikeWindow::installExtensionFromStore(QWidget *parent, const QString &input) {
     const auto id = ChromeStore::identifier(input);
     if (!id) {
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Bitte den Link einer Erweiterung aus dem Chrome Web Store eingeben."),
             QStringLiteral("Please enter the link of an extension from the Chrome Web Store.")
         ));
         return false;
     }
 
-    status_->setText(L(
+    showStatus(L(
         QStringLiteral("Paket wird vom Chrome Web Store geladen …"),
         QStringLiteral("Loading the package from the Chrome Web Store …")
     ));
@@ -22,7 +22,7 @@ bool SpikeWindow::installExtensionFromStore(QWidget *parent, const QString &inpu
     QString problem;
     const QByteArray payload = ChromeStore::download(*id, problem);
     if (!problem.isEmpty()) {
-        status_->setText(problem);
+        showStatus(problem);
         QMessageBox::warning(parent, L(QStringLiteral("Erweiterungen")), problem);
         return false;
     }
@@ -35,7 +35,7 @@ bool SpikeWindow::installExtensionFromStore(QWidget *parent, const QString &inpu
     const ChromeStore::Package package =
         ChromeStore::acceptPackage(payload, QString::fromStdString(root.string()));
     if (!package.problem.isEmpty()) {
-        status_->setText(package.problem);
+        showStatus(package.problem);
         QMessageBox::warning(parent, L(QStringLiteral("Erweiterungen")), package.problem);
         return false;
     }
@@ -64,12 +64,12 @@ bool SpikeWindow::installExtensionFromStore(QWidget *parent, const QString &inpu
     );
     if (decision != QMessageBox::Yes) {
         std::filesystem::remove_all(root, code);
-        status_->setText(L(QStringLiteral("Installation abgebrochen."),
+        showStatus(L(QStringLiteral("Installation abgebrochen."),
                            QStringLiteral("Installation cancelled.")));
         return false;
     }
 
-    status_->setText(L(QStringLiteral("MV3-Erweiterung wird installiert…"),
+    showStatus(L(QStringLiteral("MV3-Erweiterung wird installiert…"),
                        QStringLiteral("Installing MV3 extension…")));
     profile_->persistentProfile()->extensionManager()->installExtension(package.directory);
     return true;

@@ -222,6 +222,9 @@ private:
     void refreshWebKitImportPreview();
     void commitWebKitImport();
     void applyTheme();
+    /// Sets the transient status line and shows it for a few seconds — the
+    /// WebKit build has no permanent status bar.
+    void showStatus(const QString &text);
     void clearBrowsingData(int rangeIndex, bool includeHistory);
     void installWebAppearanceScript();
     void updateWebAppearance();
@@ -359,6 +362,7 @@ private:
     QCheckBox *libraryAccess_ = nullptr;
     QLineEdit *address_ = nullptr;
     QLabel *status_ = nullptr;
+    QTimer *statusHideTimer_ = nullptr;
     QLabel *profileStatus_ = nullptr;
     QLabel *agentPlaceholder_ = nullptr;
     QListWidget *agentActivity_ = nullptr;

@@ -7,7 +7,7 @@ using namespace windowSupport;
 void SpikeWindow::installLoginAutofillScript() {
     QFile source(QStringLiteral(":/yobro/LoginAutofill.js"));
     if (!source.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        status_->setText(L(QStringLiteral("Login-AutoFill ist nicht verfügbar: Skriptressource fehlt.")));
+        showStatus(L(QStringLiteral("Login-AutoFill ist nicht verfügbar: Skriptressource fehlt.")));
         return;
     }
     // The channel client is prepended instead of injected as a second script,
@@ -15,7 +15,7 @@ void SpikeWindow::installLoginAutofillScript() {
     // share an injection point, and ours needs QWebChannel to already exist.
     QFile channelClient(QStringLiteral(":/qtwebchannel/qwebchannel.js"));
     if (!channelClient.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Login-AutoFill ist nicht verfügbar: Kanalskript fehlt."),
             QStringLiteral("Login autofill is unavailable: the channel script is missing.")
         ));
@@ -106,18 +106,18 @@ void SpikeWindow::showLoginSuggestions(bool userRequested) {
     if (!page) return;
     if (page->profile()->isOffTheRecord()) {
         if (userRequested)
-            status_->setText(L(QStringLiteral("In privaten Tabs werden keine Logins gespeichert oder angeboten.")));
+            showStatus(L(QStringLiteral("In privaten Tabs werden keine Logins gespeichert oder angeboten.")));
         return;
     }
     if (!passwords_.available()) {
         if (userRequested)
-            status_->setText(L(QStringLiteral("Der Schlüsselbund ist auf dieser Plattform nicht verfügbar.")));
+            showStatus(L(QStringLiteral("Der Schlüsselbund ist auf dieser Plattform nicht verfügbar.")));
         return;
     }
     // A locked file store is not a failure, it is a state the user can change.
     if (passwords_.locked()) {
         if (userRequested) {
-            status_->setText(L(
+            showStatus(L(
                 QStringLiteral("Der Passwortspeicher ist gesperrt. In den Einstellungen unter „Gespeicherte Logins“ entsperren."),
                 QStringLiteral("The password store is locked. Unlock it in Settings under “Saved logins”.")
             ));
@@ -127,13 +127,13 @@ void SpikeWindow::showLoginSuggestions(bool userRequested) {
     const std::optional<std::string> origin = PasswordVault::originFor(page->state().url);
     if (!origin) {
         if (userRequested)
-            status_->setText(L(QStringLiteral("Logins werden nur auf HTTPS-Websites angeboten.")));
+            showStatus(L(QStringLiteral("Logins werden nur auf HTTPS-Websites angeboten.")));
         return;
     }
     const std::vector<LoginCredential> entries = passwords_.entries(*origin);
     if (entries.empty()) {
         if (userRequested) {
-            status_->setText(QStringLiteral(
+            showStatus(QStringLiteral(
                 "Für diese Website ist noch kein Login gespeichert. YOBRO fragt nach dem Anmelden."
             ));
         }
@@ -151,7 +151,7 @@ void SpikeWindow::showLoginSuggestions(bool userRequested) {
         "#loginSuggestionPopup{background:%1;border:1px solid %2;border-radius:13px;}"
         "QLabel{font-size:11px;}"
         "QPushButton{text-align:left;padding:9px 11px;}"
-    ).arg(themePalette(systemPrefersDark()).sheetBackground, themePalette(systemPrefersDark()).sheetBorder));
+    ).arg(themePalette(systemPrefersDark()).sheetBackground, themePalette(systemPrefersDark()).sheetBorder, themePalette(systemPrefersDark()).moss, themePalette(systemPrefersDark()).paper));
     auto *layout = new QVBoxLayout(popup);
     layout->setContentsMargins(13, 11, 13, 12);
     layout->setSpacing(6);
@@ -183,7 +183,7 @@ void SpikeWindow::fillLogin(const LoginCredential &credential) {
     if (!page) return;
     const std::optional<std::string> origin = PasswordVault::originFor(page->state().url);
     if (!origin || *origin != credential.origin) {
-        status_->setText(L(QStringLiteral("Die Website hat gewechselt. Bitte erneut auswählen.")));
+        showStatus(L(QStringLiteral("Die Website hat gewechselt. Bitte erneut auswählen.")));
         return;
     }
     QPointer<SpikeWindow> guard(this);
@@ -195,7 +195,7 @@ void SpikeWindow::fillLogin(const LoginCredential &credential) {
             if (!guard) return;
             const QString documentId = value.toString();
             if (documentId.isEmpty()) {
-                status_->setText(L(QStringLiteral("Kein unterstütztes Loginformular gefunden.")));
+                showStatus(L(QStringLiteral("Kein unterstütztes Loginformular gefunden.")));
                 return;
             }
             // Arguments travel as JSON so no value can break out of the call.
@@ -210,7 +210,7 @@ void SpikeWindow::fillLogin(const LoginCredential &credential) {
             ).arg(QString::fromUtf8(QJsonDocument(arguments).toJson(QJsonDocument::Compact)));
             native->runJavaScript(script, QWebEngineScript::UserWorld, [this, guard](const QVariant &result) {
                 if (!guard) return;
-                status_->setText(result.toBool()
+                showStatus(result.toBool()
                     ? L(QStringLiteral("Login ausgefüllt. Das Formular wird nicht automatisch abgeschickt."))
                     : L(QStringLiteral("Kein passendes Loginformular gefunden.")));
             });
@@ -249,7 +249,7 @@ void SpikeWindow::handleLoginCapture(const QString &username, const QString &pas
     prompt->setAttribute(Qt::WA_DeleteOnClose);
     prompt->setStyleSheet(sheetStyleSheet(systemPrefersDark()) + QStringLiteral(
         "#loginSavePrompt{background:%1;border:1px solid %2;border-radius:14px;}"
-        "#loginSaveConfirm{background:#4d5f4f;color:#f7faf2;border-color:#4d5f4f;font-weight:600;}"
+        "#loginSaveConfirm{background:%3;color:%4;border-color:%3;font-weight:600;}"
     ).arg(themePalette(systemPrefersDark()).sheetBackground, themePalette(systemPrefersDark()).sheetBorder));
     auto *layout = new QVBoxLayout(prompt);
     layout->setContentsMargins(16, 14, 16, 14);
@@ -282,14 +282,14 @@ void SpikeWindow::handleLoginCapture(const QString &username, const QString &pas
         // Saving always requires this explicit confirmation.
         switch (passwords_.store(credential, true)) {
         case PasswordStoreResult::created:
-            status_->setText(L(QStringLiteral("Login gespeichert.")));
+            showStatus(L(QStringLiteral("Login gespeichert.")));
             break;
         case PasswordStoreResult::updated:
-            status_->setText(L(QStringLiteral("Login aktualisiert.")));
+            showStatus(L(QStringLiteral("Login aktualisiert.")));
             break;
         case PasswordStoreResult::refused:
         case PasswordStoreResult::failed:
-            status_->setText(passwords_.problem().empty()
+            showStatus(passwords_.problem().empty()
                 ? L(QStringLiteral("Login konnte nicht gespeichert werden."),
                     QStringLiteral("The login could not be saved."))
                 : QString::fromStdString(passwords_.problem()));
@@ -414,7 +414,7 @@ void SpikeWindow::showSavedPasswords() {
             const bool opened = passwords_.unlock(passwordVaultPassphrase_->text().toStdString());
             passwordVaultPassphrase_->clear();
             if (!opened)
-                status_->setText(QString::fromStdString(passwords_.problem()));
+                showStatus(QString::fromStdString(passwords_.problem()));
             refreshSavedPasswords();
         });
         QObject::connect(lockButton, &QPushButton::clicked, dialog, [this] {
@@ -428,7 +428,7 @@ void SpikeWindow::showSavedPasswords() {
             );
             passwordVaultPassphrase_->clear();
             passwordVaultNewPassphrase_->clear();
-            status_->setText(changed
+            showStatus(changed
                 ? L(QStringLiteral("Passphrase geändert."), QStringLiteral("Passphrase changed."))
                 : QString::fromStdString(passwords_.problem()));
             refreshSavedPasswords();
@@ -518,7 +518,7 @@ void SpikeWindow::showSavedPasswords() {
             item->data(Qt::UserRole).toString().toStdString(),
             item->data(Qt::UserRole + 1).toString().toStdString()
         );
-        status_->setText(removed
+        showStatus(removed
             ? L(QStringLiteral("Login entfernt."))
             : L(QStringLiteral("Login konnte nicht entfernt werden.")));
         refreshSavedPasswords();
@@ -540,7 +540,7 @@ void SpikeWindow::importPasswordsFromBrowser(
     const QString &primaryPassword
 ) {
     if (browser != QStringLiteral("Safari") && profilePath.isEmpty()) {
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Bitte den Profilordner des anderen Browsers wählen."),
             QStringLiteral("Please choose the other browser's profile folder.")
         ));
@@ -550,7 +550,7 @@ void SpikeWindow::importPasswordsFromBrowser(
     const ImportedLoginSet found =
         NativePasswordImport::load(browser, profilePath, primaryPassword);
     if (!found.problem.isEmpty()) {
-        status_->setText(found.problem);
+        showStatus(found.problem);
         QMessageBox::warning(
             parent,
             L(QStringLiteral("Passwörter übernehmen"), QStringLiteral("Transfer passwords")),
@@ -559,14 +559,14 @@ void SpikeWindow::importPasswordsFromBrowser(
         return;
     }
     if (found.needsPrimaryPassword) {
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Firefox verlangt das Hauptpasswort. Bitte eintragen und erneut versuchen."),
             QStringLiteral("Firefox requires its primary password. Enter it and try again.")
         ));
         return;
     }
     if (found.logins.empty()) {
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("In diesem Profil wurden keine übernehmbaren Logins gefunden."),
             QStringLiteral("No transferable logins were found in this profile.")
         ));
@@ -621,7 +621,7 @@ void SpikeWindow::importPasswordsFromBrowser(
         ).arg(skipped));
     }
     summary.append(found.warnings);
-    status_->setText(summary.join(QStringLiteral(" ")));
+    showStatus(summary.join(QStringLiteral(" ")));
     QMessageBox::information(
         parent,
         L(QStringLiteral("Passwörter übernehmen"), QStringLiteral("Transfer passwords")),

@@ -23,7 +23,7 @@ void SpikeWindow::showOnboarding() {
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setStyleSheet(sheetStyleSheet(systemPrefersDark()));
     QObject::connect(dialog, &OnboardingDialog::completed, this, [this] {
-        status_->setText(L(QStringLiteral("Einrichtung abgeschlossen."), QStringLiteral("Setup finished.")));
+        showStatus(L(QStringLiteral("Einrichtung abgeschlossen."), QStringLiteral("Setup finished.")));
         // The WebKit build focuses the address bar afterwards.
         if (address_) {
             address_->setFocus(Qt::OtherFocusReason);

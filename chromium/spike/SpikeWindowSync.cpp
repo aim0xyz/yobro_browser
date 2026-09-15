@@ -133,7 +133,7 @@ QString SpikeWindow::applySyncSnapshot(const SyncSnapshot &snapshot, SyncTabReso
             .id = folder.id,
             .name = folder.name,
             .space = folder.space,
-            .color = folder.color.isEmpty() ? QStringLiteral("#536157") : folder.color,
+            .color = folder.color.isEmpty() ? defaultFolderColor() : folder.color,
         });
     }
 

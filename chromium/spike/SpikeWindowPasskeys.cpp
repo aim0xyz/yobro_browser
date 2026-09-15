@@ -88,7 +88,7 @@ void SpikeWindow::presentPasskeyStep(
         || request.stage == engine::PasskeyStage::cancelled) {
         passkeyControls_ = {};
         if (passkeyDialog_) passkeyDialog_->close();
-        status_->setText(request.stage == engine::PasskeyStage::completed
+        showStatus(request.stage == engine::PasskeyStage::completed
             ? L(QStringLiteral("Passkey-Anmeldung abgeschlossen."), QStringLiteral("Passkey sign-in finished."))
             : L(QStringLiteral("Passkey-Anmeldung abgebrochen."), QStringLiteral("Passkey sign-in cancelled.")));
         return;
@@ -274,7 +274,7 @@ void SpikeWindow::presentDesktopMediaPicker(
     if (request.sources.empty()) {
         // Nothing to offer. On macOS this is what an denied screen-recording
         // permission for the app itself looks like, so it is worth saying.
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Keine Bildschirme oder Fenster verfügbar. Prüfe die Bildschirmaufnahme-Berechtigung des Systems."),
             QStringLiteral("No screens or windows available. Check the system's screen-recording permission.")
         ));
@@ -352,7 +352,7 @@ void SpikeWindow::presentDesktopMediaPicker(
     QListWidgetItem *chosen = list->currentItem();
     if (outcome != QDialog::Accepted || !chosen) {
         refuse();
-        status_->setText(L(QStringLiteral("Bildschirm wird nicht geteilt."), QStringLiteral("Not sharing your screen.")));
+        showStatus(L(QStringLiteral("Bildschirm wird nicht geteilt."), QStringLiteral("Not sharing your screen.")));
         return;
     }
     const bool window = chosen->data(Qt::UserRole).toBool();
@@ -360,13 +360,13 @@ void SpikeWindow::presentDesktopMediaPicker(
     if (!controls.select || !controls.select(window, index)) {
         // The list is a snapshot; a window can be gone by the time we answer.
         refuse();
-        status_->setText(L(
+        showStatus(L(
             QStringLiteral("Die gewählte Fläche ist nicht mehr verfügbar."),
             QStringLiteral("The chosen surface is no longer available.")
         ));
         return;
     }
-    status_->setText(window
+    showStatus(window
         ? L(QStringLiteral("Ein Fenster wird geteilt."), QStringLiteral("Sharing a window."))
         : L(QStringLiteral("Ein Bildschirm wird geteilt."), QStringLiteral("Sharing a screen.")));
 }

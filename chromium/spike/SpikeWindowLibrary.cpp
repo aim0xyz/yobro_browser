@@ -28,9 +28,9 @@ void SpikeWindow::showLibrary(LibrarySection section) {
     layout->setSpacing(14);
     auto *header = new QHBoxLayout();
     auto *mark = new QLabel(QStringLiteral("◉"), dialog);
-    mark->setStyleSheet(QStringLiteral("font-size:28px;color:#b96b46"));
+    mark->setStyleSheet(QStringLiteral("font-size:26px;color:%1").arg(themePalette(currentAppearanceIsDark()).brandOrange));
     auto *title = new QLabel(L(QStringLiteral("Deine Bibliothek")), dialog);
-    title->setStyleSheet(QStringLiteral("font:500 28px Georgia,serif;color:%1").arg(themePalette(systemPrefersDark()).sheetText));
+    title->setStyleSheet(QStringLiteral("font:500 28px 'New York',Georgia,serif;color:%1").arg(themePalette(currentAppearanceIsDark()).sheetText));
     auto *close = new QPushButton(QStringLiteral("×"), dialog);
     close->setObjectName(QStringLiteral("closeLibraryButton"));
     header->addWidget(mark);
@@ -45,7 +45,7 @@ void SpikeWindow::showLibrary(LibrarySection section) {
     segmentLayout->setSpacing(4);
     auto *historySegment = new QPushButton(L(QStringLiteral("◷  Verlauf")), segment);
     historySegment->setObjectName(QStringLiteral("libraryHistorySegment"));
-    historySegment->setStyleSheet(QStringLiteral("background:#ffffff"));
+    historySegment->setStyleSheet(QStringLiteral("background:%1;border-radius:9px").arg(themePalette(currentAppearanceIsDark()).sheetSurface));
     auto *bookmarksSegment = new QPushButton(L(QStringLiteral("⌑  Lesezeichen")), segment);
     bookmarksSegment->setObjectName(QStringLiteral("libraryBookmarksSegment"));
     auto *downloadsSegment = new QPushButton(L(QStringLiteral("⇩  Downloads")), segment);
@@ -107,12 +107,12 @@ void SpikeWindow::showLibrary(LibrarySection section) {
     QObject::connect(close, &QPushButton::clicked, dialog, &QDialog::close);
     QObject::connect(historySegment, &QPushButton::clicked, dialog, [entries, historySegment, bookmarksSegment] {
         entries->setCurrentIndex(0);
-        historySegment->setStyleSheet(QStringLiteral("background:#ffffff"));
+        historySegment->setStyleSheet(QStringLiteral("background:%1;border-radius:9px").arg(themePalette(currentAppearanceIsDark()).sheetSurface));
         bookmarksSegment->setStyleSheet({});
     });
     QObject::connect(bookmarksSegment, &QPushButton::clicked, dialog, [entries, historySegment, bookmarksSegment] {
         entries->setCurrentIndex(1);
-        bookmarksSegment->setStyleSheet(QStringLiteral("background:#ffffff"));
+        bookmarksSegment->setStyleSheet(QStringLiteral("background:%1;border-radius:9px").arg(themePalette(currentAppearanceIsDark()).sheetSurface));
         historySegment->setStyleSheet({});
     });
     QObject::connect(downloadsSegment, &QPushButton::clicked, dialog, [this, dialog] {
@@ -141,7 +141,7 @@ void SpikeWindow::showLibrary(LibrarySection section) {
             (void)library_.removeBookmark(bookmarksList_->currentItem()->data(Qt::UserRole).toString().toStdString());
             refreshLibrary();
         } catch (const std::exception &error) {
-            status_->setText(QString::fromUtf8(error.what()));
+            showStatus(QString::fromUtf8(error.what()));
         }
     });
     QObject::connect(dialog, &QObject::destroyed, this, [this] {
@@ -156,7 +156,7 @@ void SpikeWindow::showLibrary(LibrarySection section) {
     refreshLibrary();
     if (section == LibrarySection::bookmarks) {
         entries->setCurrentIndex(1);
-        bookmarksSegment->setStyleSheet(QStringLiteral("background:#ffffff"));
+        bookmarksSegment->setStyleSheet(QStringLiteral("background:%1;border-radius:9px").arg(themePalette(currentAppearanceIsDark()).sheetSurface));
         historySegment->setStyleSheet({});
     }
     dialog->show();
@@ -240,13 +240,13 @@ void SpikeWindow::renameSelectedBookmark() {
     if (!accepted || title.isEmpty()) return;
     try {
         if (!library_.renameBookmark(id.toStdString(), title.toStdString())) {
-            status_->setText(L(QStringLiteral("Das Lesezeichen konnte nicht umbenannt werden."),
+            showStatus(L(QStringLiteral("Das Lesezeichen konnte nicht umbenannt werden."),
                                QStringLiteral("The bookmark could not be renamed.")));
             return;
         }
         refreshLibrary();
     } catch (const std::exception &error) {
-        status_->setText(QString::fromUtf8(error.what()));
+        showStatus(QString::fromUtf8(error.what()));
     }
 }
 
@@ -271,13 +271,13 @@ void SpikeWindow::moveSelectedBookmark() {
     if (!accepted || folder.isEmpty()) return;
     try {
         if (!library_.moveBookmark(id.toStdString(), folder.toStdString())) {
-            status_->setText(L(QStringLiteral("In diesem Ordner ist die Adresse bereits gespeichert."),
+            showStatus(L(QStringLiteral("In diesem Ordner ist die Adresse bereits gespeichert."),
                                QStringLiteral("That folder already holds this address.")));
             return;
         }
         refreshLibrary();
     } catch (const std::exception &error) {
-        status_->setText(QString::fromUtf8(error.what()));
+        showStatus(QString::fromUtf8(error.what()));
     }
 }
 
@@ -287,10 +287,10 @@ void SpikeWindow::bookmarkCurrentPage() {
     const auto state = page->state();
     try {
         const bool added = library_.addBookmark(state.title, state.url, "Bookmarks");
-        status_->setText(added ? L(QStringLiteral("Lesezeichen gespeichert.")) : L(QStringLiteral("Diese Seite ist bereits als Lesezeichen gespeichert.")));
+        showStatus(added ? L(QStringLiteral("Lesezeichen gespeichert.")) : L(QStringLiteral("Diese Seite ist bereits als Lesezeichen gespeichert.")));
         refreshLibrary();
     } catch (const std::exception &error) {
-        status_->setText(QString::fromUtf8(error.what()));
+        showStatus(QString::fromUtf8(error.what()));
     }
 }
 

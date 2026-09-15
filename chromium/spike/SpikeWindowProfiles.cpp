@@ -60,7 +60,7 @@ void SpikeWindow::activateProfile(const QString &profileId) {
     // before the switch rather than after it.
     saveSession();
     if (settingsDialog_) settingsDialog_->close();
-    status_->setText(L(QStringLiteral("Profil wird gewechselt …"), QStringLiteral("Switching profile …")));
+    showStatus(L(QStringLiteral("Profil wird gewechselt …"), QStringLiteral("Switching profile …")));
     profileSwitchHandler_(profileId.toStdString());
 }
 
@@ -79,7 +79,7 @@ void SpikeWindow::renameProfile(const QString &profileId) {
     if (!accepted || name.isEmpty()) return;
     // Renaming only changes the label; the storage identifier stays.
     if (!profiles_.setName(profileId.toStdString(), name.toStdString())) {
-        status_->setText(L(QStringLiteral("Der Name konnte nicht gespeichert werden."),
+        showStatus(L(QStringLiteral("Der Name konnte nicht gespeichert werden."),
                            QStringLiteral("The name could not be saved.")));
         return;
     }
@@ -101,7 +101,7 @@ void SpikeWindow::setProfileIcon(const QString &profileId) {
     ).trimmed();
     if (!accepted || icon.isEmpty()) return;
     if (!profiles_.setIcon(profileId.toStdString(), icon.toStdString())) {
-        status_->setText(L(QStringLiteral("Das Symbol konnte nicht gespeichert werden."),
+        showStatus(L(QStringLiteral("Das Symbol konnte nicht gespeichert werden."),
                            QStringLiteral("The icon could not be saved.")));
         return;
     }
@@ -116,7 +116,7 @@ bool SpikeWindow::launchProfileInstance(const QString &profileId) {
         QCoreApplication::applicationFilePath(),
         {QStringLiteral("--profile"), profileId}
     );
-    status_->setText(started
+    showStatus(started
         ? QStringLiteral("Profil „%1“ wird in einem eigenen Fenster geöffnet.").arg(profileId)
         : QStringLiteral("Profil „%1“ konnte nicht gestartet werden.").arg(profileId));
     return started;

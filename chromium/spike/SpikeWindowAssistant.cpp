@@ -184,7 +184,7 @@ void SpikeWindow::showMail() {
                                 const QString &subject) {
             const std::optional<MailAccount> account = mail_.account(accountId);
             const QString label = account ? account->displayLabel() : accountId;
-            status_->setText(count == 1
+            showStatus(count == 1
                 ? L(QStringLiteral("Neue Mail in "), QStringLiteral("New mail in ")) + label
                       + QStringLiteral(": ") + sender + QStringLiteral(" · ") + subject
                 : L(QStringLiteral("Neue Mail in "), QStringLiteral("New mail in ")) + label
