@@ -1,0 +1,17 @@
+.build/
+dist/
+.runtime/
+.runtime-*/
+.test-runtime/
+__pycache__/
+.DS_Store
+.yobro-signing-identity
+chromium/build/
+.chromium-runtime/
+.ref-webkit/
+website/node_modules/
+website/dist/
+CMakeFiles/
+
+# website/ has its own git repository; tracked separately
+website/

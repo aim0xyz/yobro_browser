@@ -1,0 +1,22 @@
+{
+  "snapshotPolicy": {
+    "openShadowRoots": "Interactive descendants are included recursively.",
+    "closedShadowRoots": "Content is inaccessible and excluded.",
+    "iframes": {
+      "bridgeRunsOnSubframes": false,
+      "contentIncluded": false,
+      "metadataNote": "Frame content is not included."
+    },
+    "passwordValue": "[redacted]"
+  },
+  "actionPolicy": {
+    "userOwnedPage": "Snapshots and actions are rejected before JavaScript execution.",
+    "privateAgentPage": "Creation is rejected.",
+    "fileInputs": "Fill is rejected; uploads require an explicit future user-authorized flow."
+  },
+  "documentIdentity": {
+    "fullNavigation": "Rotate document UUID and invalidate prior refs.",
+    "bfcacheRestore": "Rotate document UUID and invalidate prior refs.",
+    "reattachedElements": "A fresh snapshot restores an actionable ref."
+  }
+}

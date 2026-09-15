@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Library files v1",
+  "type": "object",
+  "$defs": {
+    "persistedDate": {
+      "description": "WebKit v1 persists Date as seconds from the Apple reference date; Chromium v1 persists an ISO-8601 timestamp. Migration readers must accept both encodings.",
+      "oneOf": [
+        {"type": "number"},
+        {"type": "string", "format": "date-time"}
+      ]
+    },
+    "downloadState": {
+      "type": "string",
+      "enum": ["downloading", "completed", "cancelled", "failed", "interrupted"]
+    }
+  },
+  "properties": {
+    "history.json": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "url", "date", "visits"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "title": {"type": "string"},
+          "url": {"type": "string"},
+          "date": {"$ref": "#/$defs/persistedDate"},
+          "visits": {"type": "integer"}
+        }
+      }
+    },
+    "bookmarks.json": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "url", "folder"],
+        "properties": {
+          "id": {"type": "string"},
+          "title": {"type": "string"},
+          "url": {"type": "string"},
+          "folder": {"type": "string"}
+        }
+      }
+    },
+    "downloads.json": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "source", "date", "state", "received", "expected"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "name": {"type": "string"},
+          "source": {"type": "string"},
+          "date": {"$ref": "#/$defs/persistedDate"},
+          "state": {"$ref": "#/$defs/downloadState"},
+          "received": {"type": "integer"},
+          "expected": {"type": "integer"},
+          "path": {
+            "description": "Optional because Swift Codable omits nil while Chromium writes an explicit null.",
+            "type": ["string", "null"]
+          },
+          "error": {
+            "description": "Optional because Swift Codable omits nil while Chromium writes an explicit null.",
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "bridge-policy.json": {
+      "type": "object",
+      "required": ["allowsLibraryAccess"],
+      "properties": {
+        "allowsLibraryAccess": {"type": "boolean"}
+      }
+    }
+  }
+}

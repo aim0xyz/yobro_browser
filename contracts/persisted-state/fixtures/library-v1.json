@@ -1,0 +1,57 @@
+{
+  "history.json": [
+    {
+      "id": "33333333-3333-3333-3333-333333333333",
+      "title": "Chromium history fixture",
+      "url": "https://fixtures.invalid/history/chromium",
+      "date": "2026-09-13T12:00:00Z",
+      "visits": 2
+    },
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "title": "WebKit history fixture",
+      "url": "https://fixtures.invalid/history/webkit",
+      "date": 810000000,
+      "visits": 1
+    }
+  ],
+  "bookmarks.json": [],
+  "downloads.json": [
+    {
+      "id": "55555555-5555-5555-5555-555555555555",
+      "name": "protocol-fast.bin",
+      "source": "https://fixtures.invalid/download/fast",
+      "date": "2026-09-13T12:01:00Z",
+      "state": "completed",
+      "received": 19,
+      "expected": 19,
+      "path": "/tmp/yobro-downloads/protocol-fast.bin",
+      "error": null
+    },
+    {
+      "id": "66666666-6666-6666-6666-666666666666",
+      "name": "protocol-slow.bin",
+      "source": "https://fixtures.invalid/download/slow",
+      "date": 810000060,
+      "state": "cancelled",
+      "received": 131072,
+      "expected": 8388608,
+      "path": null,
+      "error": null
+    },
+    {
+      "id": "77777777-7777-7777-7777-777777777777",
+      "name": "protocol-failed.bin",
+      "source": "https://fixtures.invalid/download/failed",
+      "date": "2026-09-13T12:02:00Z",
+      "state": "failed",
+      "received": 65536,
+      "expected": 8388608,
+      "path": null,
+      "error": "Fixture network failure."
+    }
+  ],
+  "bridge-policy.json": {
+    "allowsLibraryAccess": true
+  }
+}

@@ -1,0 +1,11 @@
+# Webseiten-Darkmode
+
+Der Mond in der Adressleiste öffnet „Helle Websites abdunkeln“. Standardmäßig ausgeschaltet. Erst nach bewusstem Einschalten läuft die Umwandlung im dunklen Systemmodus. Eine gespeicherte Auswahl bleibt erhalten. YOBRO selbst und Websites mit `prefers-color-scheme` folgen weiterhin der nativen macOS-Einstellung. Der Schalter „Auf dieser Website verwenden“ speichert eine Ausnahme für den exakten Host, einschließlich eingebetteter Frames. Änderungen wirken auf offene Tabs ohne Neuladen und bleiben in `web-appearance.json` im jeweiligen YOBRO-Profil erhalten.
+
+Rendering: lokal gebündelte Dark Reader API 4.9.130, MIT-Lizenz in der App (`DarkReader-LICENSE.txt`). Quelle: https://registry.npmjs.org/darkreader/-/darkreader-4.9.130.tgz; Dokumentation: https://github.com/darkreader/darkreader#using-dark-reader-for-a-website. Kein CDN zur Laufzeit, keine Erweiterung, kein Chromium und keine native Proxy-Verbindung. Die Bibliothek darf Stylesheets nur über normales CORS-Fetch ohne Credentials nachladen. Ausführung in einer separaten WKContentWorld; Stylesheet-/CustomElement-Proxies sind deaktiviert.
+
+YOBRO prüft zunächst die tatsächlichen Hintergrundfarben an sechs Positionen. Bereits überwiegend dunkle Seiten und `darkreader-lock` bleiben unverändert. Native Themewechsel über Klasse bzw. übliche data-Themeattribute werden erneut geprüft. Dynamisch ergänzte Inhalte werden von der Rendering-Engine verarbeitet. Fotos, Videos und Canvas werden nicht pauschal invertiert. Systemwechsel werden zusätzlich direkt über die effektive native WebView-Appearance übermittelt.
+
+Grenzen: Die Erkennung ist eine Heuristik. Gemischte helle/dunkle Layouts, geschlossene Shadow Roots, Canvas-Inhalte und fremde Stylesheets ohne CORS können unvollständig umgefärbt werden. Native Themewechsel über beliebige eigene Mechanismen werden nicht alle erkannt. Für solche Seiten lässt sich die Umwandlung gezielt deaktivieren. Keine Zusage, dass jede Website perfekt aussieht.
+
+Verifikation: echte WebKit-Tests für Umwandlung einer hellen Seite, unveränderten Bildfilter, dynamische Inhalte, Formularfarben, reversible Deaktivierung, Live-Wechsel Hell → Dunkel, Host-Ausnahmen und nachträglichen nativen Darkmode. Separater Test für Persistenz der Einstellungen.

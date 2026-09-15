@@ -1,0 +1,12 @@
+{
+  "readRequest": {"command": "read", "tab": "<TAB_UUID>"},
+  "readResponseResult": {"tab": {"id": "<tab uuid>", "owner": "agent"}, "page": "<AgentBridge snapshot; passwords redacted; includes document UUID>"},
+  "clickRequest": {"command": "click", "tab": "<TAB_UUID>", "document": "<DOCUMENT_UUID>", "ref": "e1"},
+  "fillRequest": {"command": "fill", "tab": "<TAB_UUID>", "document": "<DOCUMENT_UUID>", "ref": "e2", "value": "Some text"},
+  "actionResponseResult": {"tab": {"id": "<tab uuid>"}, "action": "<bridge result>", "next": "Read again to verify the outcome; pages may update asynchronously."},
+  "errors": {
+    "missingRefOrDocument": "ref und document aus einem aktuellen read sind erforderlich.",
+    "missingValue": "Wert fehlt.",
+    "staleAfterNavigation": "Navigation invalidates document/refs; read again."
+  }
+}

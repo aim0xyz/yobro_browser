@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BrowserSyncSnapshot v1 (encrypted envelope payload)",
+  "type": "object",
+  "required": ["version", "spaces", "currentSpace", "tabs", "history", "bookmarks"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "spaces": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string"}},
+    "currentSpace": {"type": "string"},
+    "tabs": {"type": "array", "maxItems": 5000, "items": {"type": "object"}},
+    "folders": {"type": "array", "items": {"type": "object"}},
+    "splitPairs": {"type": "array", "items": {"type": "object"}},
+    "bookmarks": {"type": "array", "maxItems": 50000, "items": {"type": "object"}},
+    "history": {"type": "array", "maxItems": 100000, "items": {"type": "object"}},
+    "spaceIcons": {"type": ["object", "null"]}
+  }
+}

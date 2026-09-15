@@ -1,0 +1,22 @@
+{
+  "unknownCommand": {"request": {"command": "teleport"}, "response": {"ok": false, "error": "Unbekannter Befehl: teleport"}},
+  "userTab": {"ok": false, "error": "This is a user tab. Open its URL with new to work in the right agent pane."},
+  "paused": {"ok": false, "error": "Agent operation was paused."},
+  "busy": {"ok": false, "error": "Agent is busy. Retry after the current command completes."},
+  "blocked": {"request": {"command": "space"}, "response": {"ok": false, "error": "This command changes the user workspace and is unavailable in agent mode."}},
+  "libraryGated": {"ok": false, "error": "History and downloads are blocked for the agent interface. Enable access in Settings under “Privacy & ads”."},
+  "invalidDownloadURL": {
+    "request": {"command": "download", "tab": "<TAB_UUID>", "url": "file:///tmp/not-allowed"},
+    "response": {"ok": false, "error": "Gültige HTTP- oder HTTPS-Downloadadresse erforderlich."}
+  },
+  "unknownDownload": {
+    "request": {"command": "cancel-download", "id": "88888888-8888-8888-8888-888888888888"},
+    "response": {"ok": false, "error": "Unbekannter Download."}
+  },
+  "inactiveDownload": {
+    "request": {"command": "cancel-download", "id": "55555555-5555-5555-5555-555555555555"},
+    "response": {"ok": false, "error": "Download ist nicht aktiv."}
+  },
+  "stillLoading": {"ok": false, "error": "Seite lädt noch. Später erneut mit read prüfen."},
+  "invalidJson": {"ok": false, "error": "Invalid JSON request or request too large."}
+}

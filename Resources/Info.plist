@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>de</string></array>
+  <key>CFBundleExecutable</key><string>YOBRO</string>
+  <key>CFBundleIdentifier</key><string>local.yobro.browser</string>
+  <key>CFBundleName</key><string>YoBro</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleTypeRole</key><string>Editor</string>
+    <key>CFBundleURLName</key><string>local.yobro.browser.auth</string>
+    <key>CFBundleURLSchemes</key><array><string>yobro</string></array>
+  </dict><dict>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>CFBundleURLName</key><string>Web URL</string>
+    <key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array>
+  </dict></array>
+  <key>CFBundleDisplayName</key><string>YoBro</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.6.4</string>
+  <key>CFBundleVersion</key><string>12</string>
+  <key>CFBundleIconFile</key><string>YOBRO</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSCameraUsageDescription</key><string>Websites ask YoBro before they may use the camera, for example for video calls.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Websites ask YoBro before they may use the microphone, for example for video calls.</string>
+  <key>NSAppTransportSecurity</key><dict>
+    <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+    <key>NSAllowsLocalNetworking</key><true/>
+  </dict>
+</dict></plist>

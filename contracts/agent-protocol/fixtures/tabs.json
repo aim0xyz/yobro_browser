@@ -1,0 +1,10 @@
+{
+  "request": {"command": "tabs"},
+  "responseResult": {
+    "space": "<current space name>",
+    "tabs": [
+      {"id": "<lowercase uuid>", "title": "Example", "url": "https://example.com", "space": "<space>", "owner": "agent|user", "agentActive": true, "pinned": false, "active": true, "loading": false, "error": null}
+    ]
+  },
+  "notes": "Commands without --tab target the agent current tab. User tab IDs are rejected."
+}

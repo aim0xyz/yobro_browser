@@ -1,0 +1,56 @@
+set(app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@YOBRO_CHROMIUM_APP_BUNDLE@")
+set(helper "${app}/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess")
+set(cocoa_source "@YOBRO_QT_COCOA_PLUGIN_REAL@")
+set(cocoa_directory "${app}/Contents/PlugIns/platforms")
+set(cocoa_plugin "${cocoa_directory}/libqcocoa.dylib")
+
+if(NOT EXISTS "${helper}")
+    message(FATAL_ERROR "Deployed QtWebEngineProcess helper is missing: ${helper}")
+endif()
+if(NOT EXISTS "${cocoa_source}")
+    message(FATAL_ERROR "Qt Cocoa platform plugin is missing: ${cocoa_source}")
+endif()
+
+file(MAKE_DIRECTORY "${cocoa_directory}")
+file(COPY "${cocoa_source}" DESTINATION "${cocoa_directory}")
+
+message(STATUS "Rewriting nested QtWebEngineProcess dependencies")
+execute_process(
+    COMMAND
+        "@YOBRO_MACDEPLOYQT@"
+        "${app}"
+        -appstore-compliant
+        -always-overwrite
+        -no-plugins
+        -verbose=0
+        "-executable=${helper}"
+        "-executable=${cocoa_plugin}"
+    RESULT_VARIABLE deploy_result
+    OUTPUT_VARIABLE deploy_output
+    ERROR_VARIABLE deploy_error
+)
+if(NOT deploy_result EQUAL 0)
+    message(FATAL_ERROR
+        "Nested QtWebEngineProcess deployment failed (${deploy_result}).\n"
+        "stdout:\n${deploy_output}\n"
+        "stderr:\n${deploy_error}"
+    )
+endif()
+
+execute_process(
+    COMMAND
+        "/usr/bin/python3"
+        "@CMAKE_CURRENT_SOURCE_DIR@/../scripts/chromium-fix-package.py"
+        "${app}"
+    RESULT_VARIABLE fixup_result
+    OUTPUT_VARIABLE fixup_output
+    ERROR_VARIABLE fixup_error
+)
+if(NOT fixup_result EQUAL 0)
+    message(FATAL_ERROR
+        "Chromium package fixup failed (${fixup_result}).\n"
+        "stdout:\n${fixup_output}\n"
+        "stderr:\n${fixup_error}"
+    )
+endif()
+message(STATUS "${fixup_output}")

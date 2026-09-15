@@ -1,0 +1,11 @@
+{
+  "protocol": 2,
+  "engine": "both (WebKit + Chromium must match)",
+  "commands": ["status", "tabs", "open", "new", "focus", "close", "read", "click", "fill", "scroll", "back", "forward", "reload", "pin", "split", "find", "history", "downloads", "download", "cancel-download", "duplicate", "end"],
+  "devOnly": ["capture-window (YOBRO_DEV_CAPTURE=1 only)"],
+  "blockedInAgentMode": ["space", "panel", "restore", "move"],
+  "defaultCommand": "status",
+  "serialization": "single-command after precedence; status always bypasses busy, enabled tabs/end bypass busy, all other concurrent commands -> 'Agent is busy. Retry after the current command completes.'",
+  "userTabPolicy": "reject with 'This is a user tab. Open its URL with new to work in the right agent pane.'",
+  "transport": "Unix socket 0600 + UID check (Windows Chromium: owner-only named pipe). No TCP, no CDP port."
+}

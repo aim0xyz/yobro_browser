@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StoredSession v1 (WebKit reference; Chromium importer input)",
+  "type": "object",
+  "required": ["tabs", "space"],
+  "properties": {
+    "tabs": {"type": "array", "items": {"$ref": "#/$defs/StoredTab"}},
+    "activeID": {"type": ["string", "null"], "format": "uuid"},
+    "space": {"type": "string"},
+    "closedTabs": {"type": ["array", "null"], "items": {"$ref": "#/$defs/StoredTab"}},
+    "spaces": {"type": ["array", "null"], "items": {"type": "string"}},
+    "spaceIcons": {"type": ["object", "null"], "additionalProperties": {"type": "string"}},
+    "folders": {"type": ["array", "null"], "items": {"$ref": "#/$defs/TabFolder"}},
+    "splitPairs": {"type": ["array", "null"], "items": {"$ref": "#/$defs/StoredSplit"}}
+  },
+  "$defs": {
+    "StoredTab": {
+      "type": "object", "required": ["id", "title", "url", "space", "pinned"],
+      "properties": {
+        "id": {"type": "string", "format": "uuid"}, "title": {"type": "string"},
+        "customTitle": {"type": ["string", "null"]}, "url": {"type": "string"},
+        "space": {"type": "string"}, "pinned": {"type": "boolean"},
+        "folderID": {"type": ["string", "null"], "format": "uuid"},
+        "faviconData": {"type": ["string", "null"]}, "closedIndex": {"type": ["integer", "null"]},
+        "suspended": {"type": ["boolean", "null"]}, "isPrivate": {"type": ["boolean", "null"]},
+        "interactionState": {"type": ["string", "null"], "description": "WebKit-opaque, device-local; stripped before sync/upload"},
+        "kind": {"type": ["string", "null"], "enum": ["web", "note", null]},
+        "noteContent": {"type": ["string", "null"]}, "noteRTF": {"type": ["string", "null"]}
+      }
+    },
+    "TabFolder": {
+      "type": "object", "required": ["id", "name", "space"],
+      "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "space": {"type": "string"}, "collapsed": {"type": "boolean"}, "color": {"type": ["string", "null"]}}
+    },
+    "StoredSplit": {
+      "type": "object", "required": ["first", "second"],
+      "properties": {"first": {"type": "string", "format": "uuid"}, "second": {"type": "string", "format": "uuid"}}
+    }
+  }
+}

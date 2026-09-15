@@ -1,0 +1,16 @@
+{
+  "request": {"command": "status"},
+  "responseResult": {
+    "browser": "YoBro",
+    "version": "0.6.3",
+    "engine": "WebKit (Chromium build reports 'Chromium' here; all other keys identical)",
+    "protocol": 2,
+    "enabled": true,
+    "agentPaneVisible": false,
+    "agentAction": null,
+    "socket": "<profile control socket path>",
+    "profile": "<profile display name>",
+    "libraryAccess": false,
+    "commands": ["status", "tabs", "open", "new", "focus", "close", "read", "click", "fill", "scroll", "back", "forward", "reload", "pin", "split", "find", "history", "downloads", "download", "cancel-download", "duplicate", "end"]
+  }
+}

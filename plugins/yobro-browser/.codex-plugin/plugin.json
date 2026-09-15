@@ -1,0 +1,25 @@
+{
+  "name": "yobro-browser",
+  "version": "0.1.0",
+  "description": "Control the local YOBRO browser through its private Unix socket.",
+  "author": {
+    "name": "YOBRO"
+  },
+  "keywords": ["browser", "yobro", "web", "automation"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "YOBRO Browser",
+    "shortDescription": "Browse through your local YOBRO app.",
+    "longDescription": "Lets ChatGPT and Codex use the running YOBRO browser, including its WebKit sessions, through YOBRO's private local agent socket.",
+    "developerName": "YOBRO",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "Use YOBRO to look this up.",
+      "Open this page in YOBRO and summarize it.",
+      "Continue this task in the YOBRO browser."
+    ],
+    "brandColor": "#7C5CFC"
+  },
+  "mcpServers": "./.mcp.json"
+}

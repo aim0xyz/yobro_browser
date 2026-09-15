@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "yobro": {
+      "command": "python3",
+      "args": ["scripts/yobro_mcp.py"],
+      "cwd": ".",
+      "enabled": true,
+      "startup_timeout_sec": 10,
+      "env_vars": ["YOBRO_SOCKET"]
+    }
+  }
+}

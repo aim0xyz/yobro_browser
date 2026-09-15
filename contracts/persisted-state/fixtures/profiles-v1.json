@@ -1,0 +1,7 @@
+{
+  "profiles": [
+    {"id": "00000000-0000-0000-0000-000000000001", "name": "Privat", "symbol": "person.crop.circle"},
+    {"id": "33333333-3333-3333-3333-333333333333", "name": "Arbeit", "symbol": "briefcase.fill"}
+  ],
+  "activeID": "00000000-0000-0000-0000-000000000001"
+}

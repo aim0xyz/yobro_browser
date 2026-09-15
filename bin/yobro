@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Direct control of YOBRO's visible WebKit tabs, via its private Unix socket."""
+import argparse
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+
+
+def request(payload, home=None, socket_path=None):
+    root = Path(home or os.environ.get("YOBRO_HOME", Path.home() / "Library/Application Support/YOBRO"))
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(30)
+        connection.connect(str(socket_path or os.environ.get("YOBRO_SOCKET") or root / "control.sock"))
+        connection.sendall(json.dumps(payload, ensure_ascii=False).encode() + b"\n")
+        result = bytearray()
+        while b"\n" not in result:
+            chunk = connection.recv(65536)
+            if not chunk:
+                raise RuntimeError("YOBRO closed the connection without a response.")
+            result.extend(chunk)
+            if len(result) > 8 * 1024 * 1024:
+                raise RuntimeError("Response exceeds 8 MB.")
+    return json.loads(result.split(b"\n", 1)[0])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--home", help="Override YOBRO's runtime directory")
+    parser.add_argument("--socket", help="Explicit profile socket path from the Agent panel")
+    parser.add_argument("--tab", help="Target tab UUID; defaults to the right agent tab; user tabs are protected")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("status", "tabs", "read", "focus", "close", "back", "forward", "reload", "pin", "split", "downloads", "restore", "duplicate", "end"):
+        commands.add_parser(command)
+    commands.add_parser("open").add_argument("url")
+    commands.add_parser("new").add_argument("url", nargs="?")
+    for command in ("click", "fill"):
+        sub = commands.add_parser(command)
+        sub.add_argument("ref", help="Element ref from read")
+        sub.add_argument("--document", required=True, help="Document UUID from read; protects against stale references")
+        if command == "fill":
+            sub.add_argument("value")
+    commands.add_parser("scroll").add_argument("amount", type=int, nargs="?", default=600)
+    commands.add_parser("space").add_argument("value")
+    commands.add_parser("download").add_argument("url")
+    commands.add_parser("cancel-download").add_argument("id")
+    commands.add_parser("move").add_argument("before", help="Move the target tab before this tab UUID")
+    commands.add_parser("panel").add_argument("value", choices=["history", "downloads", "palette", "agents", "mail", "settings", "none"])
+    find = commands.add_parser("find")
+    find.add_argument("query")
+    find.add_argument("--backwards", action="store_true")
+    history = commands.add_parser("history")
+    history.add_argument("query", nargs="?", default="")
+    history.add_argument("--limit", type=int, default=50)
+    commands.add_parser("raw", help="Send a JSON protocol request read from stdin")
+    args = vars(parser.parse_args())
+    home = args.pop("home")
+    socket_path = args.pop("socket")
+    if args["command"] == "raw":
+        args = json.load(sys.stdin)
+    payload = {key: value for key, value in args.items() if value is not None}
+    try:
+        result = request(payload, home, socket_path)
+    except (OSError, ValueError, RuntimeError) as error:
+        print(json.dumps({"ok": False, "error": str(error), "hint": "Start YoBro.app first; check --home if using a development session."}), file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
