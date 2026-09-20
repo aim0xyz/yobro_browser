@@ -47,10 +47,13 @@ LATEST_DMG="dist/YoBro-latest-$ARCH.dmg"
 LATEST_SHA="$LATEST_DMG.sha256"
 cp "$DMG" "$LATEST_DMG"
 shasum -a 256 "$LATEST_DMG" > "$LATEST_SHA"
+APPCAST_INPUT=$(mktemp -d)
+trap 'rm -rf "$APPCAST_INPUT"' EXIT
+cp "$DMG" "$APPCAST_INPUT/"
 .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
   --download-url-prefix "https://github.com/aim0xyz/yobro_browser/releases/download/$TAG" \
   --link "https://github.com/aim0xyz/yobro_browser" \
-  -o dist/appcast.xml dist
+  -o dist/appcast.xml "$APPCAST_INPUT"
 gh release create "$TAG" "$DMG" "$DMG.sha256" "$LATEST_DMG" "$LATEST_SHA" dist/appcast.xml \
   --repo aim0xyz/yobro_browser \
   --title "YoBro $VERSION" \
