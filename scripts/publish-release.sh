@@ -42,11 +42,16 @@ if [[ -z "$DMG" ]]; then
   echo "Release DMG was not created." >&2
   exit 1
 fi
+ARCH=$(uname -m)
+LATEST_DMG="dist/YoBro-latest-$ARCH.dmg"
+LATEST_SHA="$LATEST_DMG.sha256"
+cp "$DMG" "$LATEST_DMG"
+shasum -a 256 "$LATEST_DMG" > "$LATEST_SHA"
 .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
   --download-url-prefix "https://github.com/aim0xyz/yobro_browser/releases/download/$TAG" \
   --link "https://github.com/aim0xyz/yobro_browser" \
   -o dist/appcast.xml dist
-gh release create "$TAG" "$DMG" "$DMG.sha256" dist/appcast.xml \
+gh release create "$TAG" "$DMG" "$DMG.sha256" "$LATEST_DMG" "$LATEST_SHA" dist/appcast.xml \
   --repo aim0xyz/yobro_browser \
   --title "YoBro $VERSION" \
   --generate-notes
