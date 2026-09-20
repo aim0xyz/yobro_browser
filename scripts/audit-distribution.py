@@ -26,6 +26,11 @@ PRIVATE_NAMES = {"cookies", "cookies.sqlite", "login data", "history", "history.
                  "agent-access.json", "bridge-policy.json", "supabase.json", "space-chat.json", "mail-accounts.json",
                  ".yobro-signing-identity", ".env", "auth.json", "config.toml"}
 
+# Sparkle is a versioned macOS framework. Its normal framework entry points
+# are relative symlinks into Versions/Current; all other package symlinks are
+# still rejected below.
+ALLOWED_FRAMEWORK_SYMLINK_PREFIX = "Contents/Frameworks/Sparkle.framework/"
+
 
 def inspect_bytes(name, data, failures, depth=0):
     for rule, pattern in RULES.items():
@@ -62,7 +67,9 @@ def audit(root):
     for file in sorted(root.rglob("*")):
         name = str(file.relative_to(root))
         if file.is_symlink():
-            failures.append({"file": name, "rule": "unexpected-symlink"}); continue
+            if not name.startswith(ALLOWED_FRAMEWORK_SYMLINK_PREFIX):
+                failures.append({"file": name, "rule": "unexpected-symlink"})
+            continue
         if not file.is_file(): continue
         inspect_name(name, failures)
         data = file.read_bytes()
