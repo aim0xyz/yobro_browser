@@ -11,7 +11,7 @@ final class OnboardingTests: XCTestCase {
         let model = BrowserModel()
         XCTAssertFalse(OnboardingProgress.isComplete(home:home))
         model.showOnboarding = true
-        for step in [0,1,2] {
+        for step in [0,1,2,3] {
             let view = NSHostingView(rootView:OnboardingView(model:model,step:step))
             view.frame = NSRect(x:0,y:0,width:770,height:680)
             let window = NSWindow(contentRect:view.frame,styleMask:[.titled],backing:.buffered,defer:false)

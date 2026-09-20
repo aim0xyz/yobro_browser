@@ -37,7 +37,16 @@ struct MailHTMLView: NSViewRepresentable {
         let openURL: (URL) -> Void
         init(openURL: @escaping (URL) -> Void) { self.openURL = openURL }
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if action.navigationType == .linkActivated, let url = action.request.url, ["http", "https"].contains(url.scheme ?? "") { openURL(url); decisionHandler(.cancel); return }
+            if action.navigationType == .linkActivated,
+               let url = action.request.url,
+               ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                // Opening a tab hides Mail and tears this WKWebView down. Finish
+                // the navigation callback first; mutating the view hierarchy from
+                // inside it can leave WebKit with a blank page.
+                decisionHandler(.cancel)
+                DispatchQueue.main.async { [openURL] in openURL(url) }
+                return
+            }
             decisionHandler(action.request.url?.absoluteString == "about:blank" ? .allow : .cancel)
         }
     }
@@ -61,6 +70,6 @@ struct MailSidebarButton: View {
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .medium)).foregroundStyle(ink.opacity(0.4))
             }.padding(.horizontal, 14).frame(maxWidth: .infinity).frame(height: 44)
                 .background(active ? moss.opacity(0.15) : YOBROTheme.surface.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-        }.buttonStyle(YOBROButtonStyle()).help(L("YoBro Mail · Alle Postfächer"))
+        }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("YoBro Mail · Alle Postfächer"))
     }
 }

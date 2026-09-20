@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "yobro": {
+      "command": "./bin/yobro-mcp",
+      "args": [
+        "--connection",
+        "codex"
+      ],
+      "cwd": ".",
+      "enabled": true,
+      "startup_timeout_sec": 10
+    }
+  }
+}

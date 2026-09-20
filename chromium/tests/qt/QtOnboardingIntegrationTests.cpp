@@ -238,8 +238,9 @@ void checkStepFlow(SpikeWindow &window, const QString &root) {
     skip->click();
     check(dialog->step() == 2, "Skipping did not move to the last step.");
     check(counter->text() == QStringLiteral("3 / 3"), "The step counter is wrong on the last step.");
-    check(find<QLabel>(*dialog, QStringLiteral("onboardingResult"))->text()
-              .contains(QStringLiteral("Einstellungen")),
+    const QString resultText = find<QLabel>(*dialog, QStringLiteral("onboardingResult"))->text();
+    check(resultText.contains(QStringLiteral("Einstellungen"))
+              || resultText.contains(QStringLiteral("settings"), Qt::CaseInsensitive),
           "A skipped setup does not point at the settings.");
     check(more->isVisibleTo(dialog.get()), "The last step offers no way back into the import.");
     check(start->isVisibleTo(dialog.get()), "The last step has no finish button.");

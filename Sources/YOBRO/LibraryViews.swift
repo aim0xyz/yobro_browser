@@ -108,7 +108,7 @@ struct LibraryView: View {
                             }.buttonStyle(.plain)
                             Button { model.removeBookmark(entry) } label: {
                                 Image(systemName: "trash").font(.system(size: 11)).frame(width: 28, height: 28)
-                            }.buttonStyle(YOBROButtonStyle(minimumSize: 28)).help(L("Lesezeichen entfernen"))
+                            }.buttonStyle(YOBROButtonStyle(minimumSize: 28)).yobroHelp(L("Lesezeichen entfernen"))
                         }.padding(12).background(YOBROTheme.surface.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
                     }
                 }.padding(.horizontal, 25)
@@ -146,9 +146,9 @@ struct LibraryView: View {
                             }
                             Spacer(minLength: 0)
                             if entry.state == "downloading" {
-                                Button { downloads.cancel(entry.id) } label: { Image(systemName: "xmark.circle").padding(5) }.buttonStyle(YOBROButtonStyle()).help(L("Download abbrechen"))
+                                Button { downloads.cancel(entry.id) } label: { Image(systemName: "xmark.circle").padding(5) }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("Download abbrechen"))
                             } else if entry.state == "completed" {
-                                Button { downloads.reveal(entry) } label: { Image(systemName: "folder").padding(5) }.buttonStyle(YOBROButtonStyle()).help(L("Im Finder zeigen"))
+                                Button { downloads.reveal(entry) } label: { Image(systemName: "folder").padding(5) }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("Im Finder zeigen"))
                             }
                         }.padding(16).background(YOBROTheme.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
                     }
@@ -255,9 +255,9 @@ struct PageFindBar: View {
             TextField(L("Auf dieser Seite suchen"), text: $query).textFieldStyle(.plain).frame(minWidth: 80, idealWidth: 160, maxWidth: 210).focused($focused)
                 .onSubmit { Task { await tab.find(query) } }
             if let found = tab.findFound { Text(found ? L("Treffer") : L("Kein Treffer")).font(.system(size: 10)).foregroundStyle(found ? moss : .orange) }
-            if let error = tab.findError { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help(error) }
-            Button { Task { await tab.find(tab.findQuery, backwards: true) } } label: { Image(systemName: "chevron.up") }.help(L("Vorheriger Treffer"))
-            Button { Task { await tab.find(tab.findQuery) } } label: { Image(systemName: "chevron.down") }.help(L("Nächster Treffer"))
+            if let error = tab.findError { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).yobroHelp(error) }
+            Button { Task { await tab.find(tab.findQuery, backwards: true) } } label: { Image(systemName: "chevron.up") }.yobroHelp(L("Vorheriger Treffer"))
+            Button { Task { await tab.find(tab.findQuery) } } label: { Image(systemName: "chevron.down") }.yobroHelp(L("Nächster Treffer"))
             Button { tab.showFind = false; Task { await tab.find("") } } label: { Image(systemName: "xmark") }.keyboardShortcut(.cancelAction)
         }.buttonStyle(YOBROButtonStyle()).font(.system(size: 12)).padding(7)
             .background(paper, in: RoundedRectangle(cornerRadius: 11)).shadow(color: .black.opacity(0.12), radius: 16, y: 6)
@@ -279,19 +279,19 @@ struct LibraryButtons: View {
                 Label(L("Verlauf", "History"), systemImage: "clock.arrow.circlepath")
                     .labelStyle(.iconOnly).frame(maxWidth: .infinity, minHeight: 28)
             }
-            .help(L("Verlauf · ⌘Y"))
+            .yobroHelp(L("Verlauf · ⌘Y"))
             .accessibilityLabel(L("Verlauf"))
             Button { model.librarySection = .bookmarks } label: {
                 Label(L("Lesezeichen", "Bookmarks"), systemImage: "bookmark")
                     .labelStyle(.iconOnly).frame(maxWidth: .infinity, minHeight: 28)
             }
-            .help(L("Lesezeichen · ⌥⌘B", "Bookmarks · ⌥⌘B"))
+            .yobroHelp(L("Lesezeichen · ⌥⌘B", "Bookmarks · ⌥⌘B"))
             .accessibilityLabel(L("Lesezeichen", "Bookmarks"))
             Button { model.librarySection = .downloads } label: {
                 Label("Downloads", systemImage: "arrow.down.circle")
                     .labelStyle(.iconOnly).frame(maxWidth: .infinity, minHeight: 28)
             }
-            .help("Downloads · ⇧⌘J")
+            .yobroHelp("Downloads · ⇧⌘J")
             .accessibilityLabel("Downloads")
         }
         .buttonStyle(YOBROButtonStyle(minimumSize: 28))

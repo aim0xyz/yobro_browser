@@ -195,15 +195,15 @@ struct RichTextToolbar: View {
     var body: some View {
         HStack(spacing: 5) {
             Button { commands.heading() } label: { Text("H1").font(.system(size: 12, weight: .bold)) }
-                .help(L("Überschrift", "Heading"))
+                .yobroHelp(L("Überschrift", "Heading"))
             Button { commands.bodyText() } label: { Text("T").font(.system(size: 13)) }
-                .help(L("Fließtext", "Body text"))
+                .yobroHelp(L("Fließtext", "Body text"))
             Divider().frame(height: 18)
             Button { commands.toggleBold() } label: { Image(systemName: "bold") }
             Button { commands.toggleItalic() } label: { Image(systemName: "italic") }
             Button { commands.toggleUnderline() } label: { Image(systemName: "underline") }
             Button { commands.rememberSelection(); link = ""; linkError = false; addingLink = true } label: { Image(systemName: "link") }
-                .help(L("Ausgewählten Text verlinken", "Link selected text"))
+                .yobroHelp(L("Ausgewählten Text verlinken", "Link selected text"))
                 .popover(isPresented: $addingLink) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(L("Link einfügen", "Insert link")).font(.headline)

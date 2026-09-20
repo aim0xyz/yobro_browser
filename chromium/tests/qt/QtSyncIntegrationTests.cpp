@@ -160,10 +160,10 @@ void checkSnapshotContents(Instance &first) {
     // A bookmark, a note and two pages, one of them private.
     check(first.library->addBookmark("Beispiel", "https://example.com/", "Reisen"),
           "The fixture bookmark was not stored.");
-    window.findChild<QPushButton *>(QStringLiteral("newNoteButton"))->click();
+    window.findChild<QPushButton *>(QStringLiteral("sidebarNewNoteButton"))->click();
     auto *tabs = window.findChild<QTabWidget *>(QStringLiteral("browserTabs"));
     check(tabs != nullptr, "The tab bar is missing.");
-    window.findChild<QPushButton *>(QStringLiteral("privateTabButton"))->click();
+    window.findChild<QPushButton *>(QStringLiteral("sidebarPrivateTabButton"))->click();
     QTest::qWait(100);
 
     const SyncSnapshot snapshot = window.buildSyncSnapshot();

@@ -1,0 +1,21 @@
+Install YoBro
+
+1. Drag YoBro.app onto Applications.
+2. Launch YoBro from Applications, then eject this disk image.
+3. Follow onboarding to optionally import browser data and connect your agent.
+4. Settings → Agents lets you select the profile, install the bundled extension,
+   explicitly allow access, and check the local connection. No socket path is needed.
+
+Claude Desktop: Save the bundled YOBRO.mcpb from YoBro, then install it in
+Claude Settings → Extensions → Install Extension.
+Codex: Click Install Codex plugin in YoBro, then start a new chat.
+ChatGPT Remote: A public connection service has not been set up yet.
+
+No personal browser profiles, cookies, passwords, mail accounts, or VPN credentials
+are included. Content later read by a cloud agent is sent to its provider.
+You can pause agent access in YoBro at any time.
+
+Builds named -local are unnotarized test builds, not public releases.
+Apple Silicon and Intel builds must be built and verified separately.
+Mail transport and some browser import features currently require Python 3.9+;
+the browser and bundled agent adapter do not require a separate Python installation.

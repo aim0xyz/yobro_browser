@@ -14,7 +14,7 @@ final class AdBlockerTests: XCTestCase {
 
         XCTAssertFalse(list.identifier.isEmpty)
         XCTAssertTrue(AdBlocker.ruleJSON.contains("doubleclick"))
-        XCTAssertTrue(AdBlocker.ruleJSON.contains("stats"))
+        XCTAssertTrue(AdBlocker.ruleJSON.contains("analytics"))
         XCTAssertTrue(AdBlocker.ruleJSON.contains("ytd-ad-slot-renderer"))
         XCTAssertTrue(AdBlocker.ruleJSON.contains("third-party"))
         XCTAssertGreaterThan(AdBlocker.blockedDomains.count, 90)

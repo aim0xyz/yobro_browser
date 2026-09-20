@@ -320,13 +320,22 @@ struct SpaceProxySettingsView: View {
                 YOBROSettingsHeading(
                     icon: "network.badge.shield.half.filled",
                     title: L("Privater Standort", "Private location"),
-                    detail: L("Wähle einen Ort. YoBro verbindet sich verschlüsselt – ohne Serveradressen, Ports oder Passwörter.", "Choose a location. YoBro connects securely without server addresses, ports, or passwords.")
+                    detail: L("VPN-Zugänge werden auf deinem Gerät eingerichtet. YoBro liefert keine persönlichen Server oder Zugangsschlüssel mit.", "VPN access is configured on your device. YoBro does not ship personal servers or access keys.")
                 )
+
+                Text(L("Eigener YoBro-Proxy", "Your YoBro proxy")).font(.headline)
 
                 VStack(spacing: 10) {
                     locationRow(nil)
                     ForEach(vpn.locations) { location in locationRow(location) }
                 }
+
+                if vpn.locations.isEmpty {
+                    Text(L("Kein VPN-Zugang eingerichtet. Du kannst weiterhin eigene Proxys pro Space konfigurieren.", "No VPN access configured. You can still configure your own proxies per space."))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+
+                ManagedVPNSetupView(vpn: vpn)
 
                 statusCard
 
@@ -354,8 +363,8 @@ struct SpaceProxySettingsView: View {
             HStack(spacing: 14) {
                 Text(location?.flag ?? "○").font(.system(size: location == nil ? 22 : 28)).frame(width: 38)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(location?.title ?? L("Aus", "Off")).font(.system(size: 14, weight: .semibold))
-                    Text(location?.subtitle ?? L("Normale Verbindung", "Normal connection")).font(.caption).foregroundStyle(.secondary)
+                    Text(location?.title ?? L("YoBro-Proxy aus", "YoBro proxy off")).font(.system(size: 14, weight: .semibold))
+                    Text(location?.subtitle ?? L("Verbindung über macOS", "Connection through macOS")).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if selected { Image(systemName: "checkmark.circle.fill").font(.system(size: 19)).foregroundStyle(moss) }
@@ -373,13 +382,13 @@ struct SpaceProxySettingsView: View {
     private var statusCard: some View {
         switch vpn.status {
         case .disconnected:
-            Label(L("VPN ist ausgeschaltet", "VPN is off"), systemImage: "shield.slash")
+            Label(L("YoBro-Proxy ist aus · System-VPN separat prüfen", "YoBro proxy is off · check system VPN separately"), systemImage: "shield.slash")
                 .foregroundStyle(.secondary).yobroCard(padding: 14)
         case .connecting:
             HStack(spacing: 10) { ProgressView().controlSize(.small); Text(L("Sichere Verbindung wird aufgebaut …", "Establishing secure connection …")) }
                 .foregroundStyle(moss).yobroCard(padding: 14)
         case .connected(let location):
-            Label(L("Verbunden mit \(location.city) · kanadische IP bestätigt", "Connected to \(location.city) · Canadian IP verified"), systemImage: "checkmark.shield.fill")
+            Label(L("Verbunden mit \(location.city) · konfigurierte IP bestätigt", "Connected to \(location.city) · configured IP verified"), systemImage: "checkmark.shield.fill")
                 .foregroundStyle(moss).yobroCard(padding: 14)
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill")

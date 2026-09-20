@@ -2,7 +2,7 @@
 
 **Your browser. Your bro.**
 
-A native macOS browser prototype with an Arc-inspired sidebar and direct agent access to **the same visible tabs**. SwiftUI + AppKit + Apple's WebKit. No Chromium, Electron, Playwright, browser extension, MCP server, or computer-use automation.
+A native macOS browser prototype with an Arc-inspired sidebar and dedicated agent tabs sharing the selected profile's WebKit sessions. SwiftUI + AppKit + Apple's WebKit, with a bundled native MCP adapter for local agents.
 
 ## Run
 
@@ -17,6 +17,22 @@ open dist/YoBro.app
 ```
 
 The built app is at `dist/YoBro.app`. The CLI is also included in the app at `Contents/MacOS/yobroctl` (a distinct filename from the internal `YOBRO` executable on case-insensitive macOS volumes). The app itself does not require Python.
+
+## Installable DMG and agent setup
+
+Run `./scripts/build-dmg.sh --local` for an architecture-labelled test DMG. Drag YoBro
+into Applications and follow onboarding. Settings → Agents includes a bundled Claude
+extension and a Codex plugin installer, with a saved profile binding and no socket
+copying. Agent access starts paused and requires explicit permission. The native
+adapter needs no separate Python installation. ChatGPT remote is not provisioned.
+
+Public releases require Developer ID signing and Apple notarization; `--release`
+refuses to run without that configuration. Packaging uses an explicit allowlist,
+scans nested archives for recognized secrets/private state, and emits a privacy
+audit and checksum. VPN locations and access keys are never bundled; users can
+configure their own Outline access in settings.
+
+See [installation, privacy boundaries and release prerequisites](docs/INSTALLATION-AND-DISTRIBUTION.md).
 
 ## Browser
 
@@ -60,7 +76,7 @@ Registry: `profiles.json` in the existing `YOBRO` data directory. Additional pro
 
 ## Agent protocol
 
-### ChatGPT and Codex plugin
+### Local Codex plugin for development
 
 The local `yobro-browser` plugin packages the agent protocol as MCP tools plus an automatically discoverable workflow. After installing it from the repository marketplace, prompts such as **“Use YoBro to look this up”** or **“Open this in YoBro”** route browser work to the running YoBro app instead of a separate browser runtime.
 
@@ -71,7 +87,7 @@ codex plugin marketplace add /absolute/path/to/Orbit
 codex plugin add yobro-browser@personal
 ```
 
-Restart the ChatGPT desktop app and start a new chat after installation so the plugin's skill and MCP tools are loaded. The plugin source is in `plugins/yobro-browser`; its dependency-free smoke test is:
+Start a new Codex conversation after installation so the skill and tools are loaded. This local developer plugin is separate from ChatGPT remote connectors. For the packaged app, use Settings → Agents instead of these checkout commands. The developer plugin source is in `plugins/yobro-browser`; its dependency-free smoke test is:
 
 ```sh
 python3 plugins/yobro-browser/scripts/test_yobro_mcp.py

@@ -1,5 +1,12 @@
 #include "spike/SpikeWindowInternal.hpp"
 
+#include <QWidget>
+
+#if defined(__APPLE__)
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
+
 namespace yobro::spike::windowSupport {
 
 qtwebengine::QtBrowserPage *asQtPage(engine::BrowserPage *page) {
@@ -131,20 +138,484 @@ QIcon decodeIcon(const QString &encoded) {
     return QIcon(pixmap);
 }
 
+void configureMacWindowFrame(QWidget *window) {
+#if defined(__APPLE__)
+    if (!window || window->testAttribute(Qt::WA_DontShowOnScreen)) return;
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa")) return;
+    if (!window->windowHandle()) return;
+    id nsView = reinterpret_cast<id>(window->winId());
+    if (!nsView) return;
+    id nsWindow = reinterpret_cast<id (*)(id, SEL)>(&objc_msgSend)(nsView, sel_registerName("window"));
+    if (!nsWindow) return;
+
+    reinterpret_cast<void (*)(id, SEL, bool)>(&objc_msgSend)(
+        nsWindow, sel_registerName("setTitlebarAppearsTransparent:"), true
+    );
+    reinterpret_cast<void (*)(id, SEL, long)>(&objc_msgSend)(
+        nsWindow, sel_registerName("setTitleVisibility:"), 1
+    );
+    long mask = reinterpret_cast<long (*)(id, SEL)>(&objc_msgSend)(
+        nsWindow, sel_registerName("styleMask")
+    );
+    mask |= (1L << 15); // NSWindowStyleMaskFullSizeContentView
+    reinterpret_cast<void (*)(id, SEL, long)>(&objc_msgSend)(
+        nsWindow, sel_registerName("setStyleMask:"), mask
+    );
+    reinterpret_cast<void (*)(id, SEL, bool)>(&objc_msgSend)(
+        nsWindow, sel_registerName("setMovableByWindowBackground:"), true
+    );
+#else
+    Q_UNUSED(window);
+#endif
+}
+
 QString diagnosticStartPage(bool privatePage) {
+    const bool dark = currentAppearanceIsDark();
+    const ThemePalette &palette = themePalette(dark);
+    const QColor mossColor(palette.moss);
+    const QString mossGlow = QStringLiteral("rgba(%1, %2, %3, 0.08)").arg(
+        QString::number(mossColor.red()),
+        QString::number(mossColor.green()),
+        QString::number(mossColor.blue())
+    );
+
     if (privatePage) {
-        return QStringLiteral(R"HTML(
-<!doctype html><html><head><meta charset="utf-8"><title>Privates Browsen</title>
-<style>body{font:16px system-ui;background:#151b17;color:#e5eadf;display:grid;place-items:center;height:100vh;margin:0}main{max-width:520px;padding:48px;border:1px solid #344037;border-radius:22px;background:#1d251f;box-shadow:0 18px 60px #0008}h1{font:500 38px Georgia,serif;margin:0 0 15px}p{line-height:1.65;color:#aeb9ac}</style></head><body><main><h1>Privates Browsen</h1><p>Cookies und Websitedaten bleiben nur bis zum Schließen dieses Tabs. Verlauf und Sitzung werden nicht gespeichert.</p></main></body></html>
-)HTML");
-    }
-    return QStringLiteral(R"HTML(
-<!doctype html><html><head><meta charset="utf-8"><title>YOBRO</title>
+        const QString title = L(QStringLiteral("Privates Browsen"), QStringLiteral("Private browsing"));
+        const QString detail = L(
+            QStringLiteral("Cookies und Websitedaten bleiben nur bis zum Schließen des Tabs. Verlauf und Sitzung werden nicht gespeichert."),
+            QStringLiteral("Cookies and website data last only until you close the tab. History and session are not saved.")
+        );
+        const QString searchPlaceholder = L(
+            QStringLiteral("Privat suchen oder URL eingeben"),
+            QStringLiteral("Search privately or enter URL")
+        );
+        const QString searchHint = L(
+            QStringLiteral("Adresse eingeben oder direkt im Web suchen · Enter zum Öffnen"),
+            QStringLiteral("Enter an address or search the web · Press Enter to open")
+        );
+
+        return QStringLiteral(R"HTML(<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>%1</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#151b17;color:#edf0e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;overflow:hidden}main{text-align:center;width:min(900px,88vw);padding:48px 0 38px}.orbit{width:160px;height:160px;margin:0 auto 34px;border:2px solid #29342d;border-radius:50%;position:relative}.orbit:before,.orbit:after{content:"";position:absolute;border:2px solid #35433a;border-radius:50%;inset:20px}.orbit:after{inset:47px;border-color:#bf6c43;transform:rotate(-37deg) scaleX(1.48)}.planet{position:absolute;inset:57px;border:9px solid #bf6c43;border-radius:44% 56% 49% 51%;transform:rotate(-37deg)}.eyebrow{color:#b8c9b1;font:700 12px ui-monospace,SFMono-Regular,monospace;letter-spacing:.44em;margin-bottom:26px}.headline{font:500 clamp(55px,8vw,103px)/.98 Georgia,serif;letter-spacing:-.06em;margin:0}.detail{color:#9aa49b;font-size:16px;margin:28px 0 38px}.search{width:min(590px,100%);height:72px;margin:auto;display:flex;align-items:center;gap:13px;padding:0 16px 0 21px;border:1px solid #4a574d;border-radius:24px;background:#364038;color:#dfe5dc;font-size:18px;font-weight:600;text-align:left}.search b{color:#9aab98;font-size:28px;font-weight:300}.go{margin-left:auto;width:48px;height:48px;border-radius:15px;background:#84927e;color:#344037;display:grid;place-items:center;font-size:28px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:min(810px,100%);margin:34px auto 0;text-align:left}.card{min-height:158px;padding:22px 24px;border:1px solid #344037;border-radius:20px;background:#273129}.icon{width:48px;height:48px;display:grid;place-items:center;border-radius:14px;background:#344b39;color:#e8eee3;font-size:25px}.card:nth-child(2) .icon{background:#443a56}.card:nth-child(3) .icon{background:#554132}.card h2{margin:21px 0 7px;font-size:19px}.card p{margin:0;color:#98a398;font-size:13px}@media(max-width:650px){.cards{grid-template-columns:1fr}.headline{font-size:53px}.orbit{transform:scale(.78);margin-bottom:10px}}
-.search{padding:0}.search input{flex:1;height:100%;border:0;background:transparent;color:#dfe5dc;font-size:18px;font-weight:600;outline:0;padding:0}.search input::placeholder{color:#9aab98;font-weight:600}.search button{margin-left:auto;width:48px;height:48px;border:0;border-radius:15px;background:#84927e;color:#344037;font-size:28px;cursor:pointer}.search form{display:flex;align-items:center;gap:13px;width:100%;height:100%;padding:0 16px 0 21px}.card{text-decoration:none;color:inherit;display:block}.card:hover{border-color:#4a574d}
-</style></head><body><main><div class="orbit"><div class="planet"></div></div><div class="eyebrow">DEIN RAUM IM WEB</div><h1 class="headline">Weniger Suchen.<br>Mehr Entdecken.</h1><p class="detail">Für große Ideen und die kleinen Umwege dazwischen.</p><div class="search"><form action="https://duckduckgo.com/" method="get"><b>⌕</b><input name="q" type="search" autofocus placeholder="Wohin zieht es dich?" aria-label="Suchen oder Adresse eingeben"><button type="submit" aria-label="Suche starten">→</button></form></div><div class="cards"><a class="card" href="https://wikipedia.org"><div class="icon">◉</div><h2>Entdecken</h2><p>wikipedia.org</p></a><a class="card" href="https://github.com"><div class="icon">{ }</div><h2>Entwickeln</h2><p>github.com</p></a><a class="card" href="https://news.ycombinator.com"><div class="icon">▤</div><h2>Lesen</h2><p>news.ycombinator.com</p></a></div></main></body></html>
-)HTML");
+:root { color-scheme: %2; }
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 50% 35%, %3 0%, transparent 60%), %4;
+    color: %5;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+main {
+    text-align: center;
+    width: min(540px, 92vw);
+}
+.icon-wrap {
+    margin: 0 auto 16px;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: %6;
+}
+.icon-wrap svg {
+    width: 54px;
+    height: 54px;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+h1 {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Display", sans-serif;
+    font-size: 36px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    margin: 0 0 8px;
+    color: %5;
+}
+p.detail {
+    margin: 0 0 28px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: %7;
+    max-width: 460px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.card {
+    background: %8;
+    border: 1px solid %9;
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    padding: 16px;
+    text-align: left;
+}
+.search-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: %10;
+    border: 1px solid %9;
+    border-radius: 12px;
+    height: 48px;
+    padding: 0 14px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.search-box:focus-within {
+    border-color: %6;
+    box-shadow: 0 0 0 1.5px %6;
+}
+.search-box svg {
+    width: 18px;
+    height: 18px;
+    stroke: %6;
+    stroke-width: 2;
+    fill: none;
+    flex-shrink: 0;
+}
+.search-box form {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+}
+.search-box input {
+    flex: 1;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: %5;
+    font-size: 15px;
+    font-family: inherit;
+    outline: 0;
+    padding: 0;
+}
+.search-box input::placeholder {
+    color: %7;
+}
+.search-box button {
+    border: 0;
+    background: transparent;
+    color: %6;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.search-box button svg {
+    width: 16px;
+    height: 16px;
+}
+.hint {
+    margin: 10px 4px 0;
+    font-size: 11px;
+    color: %7;
+}
+</style>
+</head>
+<body>
+<main>
+    <div class="icon-wrap">
+        <svg viewBox="0 0 24 24"><circle cx="6" cy="15" r="4"/><circle cx="18" cy="15" r="4"/><path d="M14 15a2 2 0 0 0-4 0"/><path d="M2.5 13 5 7c.7-1.3 1.4-2 3-2"/><path d="M21.5 13 19 7c-.7-1.3-1.5-2-3-2"/></svg>
+    </div>
+    <h1>%1</h1>
+    <p class="detail">%11</p>
+    <div class="card">
+        <div class="search-box">
+            <svg viewBox="0 0 24 24"><circle cx="6" cy="15" r="4"/><circle cx="18" cy="15" r="4"/><path d="M14 15a2 2 0 0 0-4 0"/><path d="M2.5 13 5 7c.7-1.3 1.4-2 3-2"/><path d="M21.5 13 19 7c-.7-1.3-1.5-2-3-2"/></svg>
+            <form action="https://duckduckgo.com/" method="get">
+                <input name="q" type="search" autofocus placeholder="%12" aria-label="%12">
+                <button type="submit" aria-label="Search">
+                    <svg viewBox="0 0 24 24"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>
+                </button>
+            </form>
+        </div>
+        <div class="hint">%13</div>
+    </div>
+</main>
+</body>
+</html>)HTML")
+            .arg(title)                               // %1
+            .arg(dark ? QStringLiteral("dark") : QStringLiteral("light")) // %2
+            .arg(mossGlow)                            // %3
+            .arg(palette.paper)                       // %4
+            .arg(palette.ink)                         // %5
+            .arg(palette.moss)                        // %6
+            .arg(palette.textMuted)                   // %7
+            .arg(palette.surface)                     // %8
+            .arg(palette.borderSoft)                  // %9
+            .arg(palette.field)                       // %10
+            .arg(detail)                              // %11
+            .arg(searchPlaceholder)                   // %12
+            .arg(searchHint);                         // %13
+    }
+
+    const QString title = QStringLiteral("YoBro");
+    const QString subtitle = L(
+        QStringLiteral("Wohin geht es als Nächstes?"),
+        QStringLiteral("Where to next?")
+    );
+    const QString searchPlaceholder = L(
+        QStringLiteral("Suchen oder URL eingeben"),
+        QStringLiteral("Search or enter URL")
+    );
+    const QString searchHint = L(
+        QStringLiteral("Adresse eingeben oder direkt im Web suchen · Enter zum Öffnen"),
+        QStringLiteral("Enter an address or search the web · Press Enter to open")
+    );
+    const QString discoverTitle = L(QStringLiteral("Entdecken"), QStringLiteral("Discover"));
+    const QString developTitle = L(QStringLiteral("Entwickeln"), QStringLiteral("Develop"));
+    const QString readTitle = L(QStringLiteral("Lesen"), QStringLiteral("Read"));
+
+    return QStringLiteral(R"HTML(<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>%1</title>
+<style>
+:root { color-scheme: %2; }
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 50% 35%, %3 0%, transparent 65%), %4;
+    color: %5;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+main {
+    text-align: center;
+    width: min(540px, 92vw);
+}
+.brand-mark {
+    margin: 0 auto 14px;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.brand-mark svg {
+    width: 58px;
+    height: 58px;
+}
+h1 {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Display", sans-serif;
+    font-size: 42px;
+    font-weight: 600;
+    letter-spacing: -0.05em;
+    margin: 0 0 6px;
+    color: %5;
+}
+p.subtitle {
+    margin: 0 0 26px;
+    font-size: 13px;
+    color: %6;
+}
+.card {
+    background: %7;
+    border: 1px solid %8;
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    padding: 16px;
+    text-align: left;
+}
+.search-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: %9;
+    border: 1px solid %8;
+    border-radius: 12px;
+    height: 48px;
+    padding: 0 14px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.search-box:focus-within {
+    border-color: %10;
+    box-shadow: 0 0 0 1.5px %10;
+}
+.search-box svg {
+    width: 18px;
+    height: 18px;
+    stroke: %10;
+    stroke-width: 2;
+    fill: none;
+    flex-shrink: 0;
+}
+.search-box form {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+}
+.search-box input {
+    flex: 1;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: %5;
+    font-size: 15px;
+    font-family: inherit;
+    outline: 0;
+    padding: 0;
+}
+.search-box input::placeholder {
+    color: %6;
+}
+.search-box button {
+    border: 0;
+    background: transparent;
+    color: %10;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.search-box button svg {
+    width: 16px;
+    height: 16px;
+}
+.hint {
+    margin: 10px 4px 0;
+    font-size: 11px;
+    color: %6;
+}
+.shortcuts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 20px;
+}
+.shortcut {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: %7;
+    border: 1px solid %8;
+    border-radius: 14px;
+    padding: 14px 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.shortcut:hover {
+    transform: translateY(-2px);
+    border-color: %10;
+    background: %9;
+}
+.shortcut-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: %11;
+    color: %10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+.shortcut-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+}
+.shortcut-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: %5;
+    margin-bottom: 2px;
+}
+.shortcut-domain {
+    font-size: 11px;
+    color: %6;
+}
+</style>
+</head>
+<body>
+<main>
+    <div class="brand-mark">
+        <svg viewBox="0 0 64 64" fill="none">
+            <rect width="64" height="64" rx="16" fill="%12"/>
+            <path d="M22 20L32 35L42 20M32 35V45" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
+    <h1>%1</h1>
+    <p class="subtitle">%13</p>
+    <div class="card">
+        <div class="search-box">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <form action="https://duckduckgo.com/" method="get">
+                <input name="q" type="search" autofocus placeholder="%14" aria-label="%14">
+                <button type="submit" aria-label="Search">
+                    <svg viewBox="0 0 24 24"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>
+                </button>
+            </form>
+        </div>
+        <div class="hint">%15</div>
+    </div>
+    <div class="shortcuts">
+        <a class="shortcut" href="https://wikipedia.org">
+            <div class="shortcut-icon">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="shortcut-title">%16</div>
+            <div class="shortcut-domain">wikipedia.org</div>
+        </a>
+        <a class="shortcut" href="https://github.com">
+            <div class="shortcut-icon">
+                <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div class="shortcut-title">%17</div>
+            <div class="shortcut-domain">github.com</div>
+        </a>
+        <a class="shortcut" href="https://news.ycombinator.com">
+            <div class="shortcut-icon">
+                <svg viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+            </div>
+            <div class="shortcut-title">%18</div>
+            <div class="shortcut-domain">news.ycombinator.com</div>
+        </a>
+    </div>
+</main>
+</body>
+</html>)HTML")
+        .arg(title)                                   // %1
+        .arg(dark ? QStringLiteral("dark") : QStringLiteral("light")) // %2
+        .arg(mossGlow)                                // %3
+        .arg(palette.paper)                           // %4
+        .arg(palette.ink)                             // %5
+        .arg(palette.textMuted)                       // %6
+        .arg(palette.surface)                         // %7
+        .arg(palette.borderSoft)                      // %8
+        .arg(palette.field)                           // %9
+        .arg(palette.moss)                            // %10
+        .arg(palette.selectionWash)                   // %11
+        .arg(palette.brandOrange)                     // %12
+        .arg(subtitle)                                // %13
+        .arg(searchPlaceholder)                       // %14
+        .arg(searchHint)                              // %15
+        .arg(discoverTitle)                           // %16
+        .arg(developTitle)                            // %17
+        .arg(readTitle);                              // %18
 }
 
 } // namespace yobro::spike::windowSupport

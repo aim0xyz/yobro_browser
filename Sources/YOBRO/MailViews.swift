@@ -25,35 +25,35 @@ struct MailWorkspace: View {
             HStack(spacing: 12) {
                 if singleColumnMail, store.selected != nil {
                     Button { store.selectedID = nil } label: { Image(systemName: "chevron.left") }
-                        .help(L("Zurück zu Nachrichten", "Back to messages"))
+                        .yobroHelp(L("Zurück zu Nachrichten", "Back to messages"))
                 }
                 Image(systemName: "envelope.open").foregroundStyle(moss)
                 Text("YoBro Mail").font(.system(size: compactMail ? 17 : 21, weight: .medium, design: .serif)).lineLimit(1)
                 Spacer()
                 if compactMail {
                     Button { mailboxesExpanded.toggle() } label: { Image(systemName: "sidebar.left") }
-                        .help(mailboxesExpanded ? L("Postfächer einklappen", "Collapse mailboxes") : L("Postfächer einblenden", "Show mailboxes"))
+                        .yobroHelp(mailboxesExpanded ? L("Postfächer einklappen", "Collapse mailboxes") : L("Postfächer einblenden", "Show mailboxes"))
                         .accessibilityLabel(mailboxesExpanded ? L("Postfächer einklappen", "Collapse mailboxes") : L("Postfächer einblenden", "Show mailboxes"))
                 }
                 if store.refreshing { ProgressView().controlSize(.small) }
-                Button { MailSecrets.session.retryFailures(); Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }.disabled(store.accounts.isEmpty || store.refreshing).help(L("Alle Postfächer aktualisieren"))
+                Button { MailSecrets.session.retryFailures(); Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }.disabled(store.accounts.isEmpty || store.refreshing).yobroHelp(L("Alle Postfächer aktualisieren"))
                 if compactMail {
-                    Button { compose = true } label: { Image(systemName: "square.and.pencil") }.disabled(store.accounts.isEmpty).help(L("Schreiben"))
+                    Button { compose = true } label: { Image(systemName: "square.and.pencil") }.disabled(store.accounts.isEmpty).yobroHelp(L("Schreiben"))
                     Menu {
                         Button(store.notificationsEnabled ? L("Mail-Mitteilungen ausschalten") : L("Mail-Mitteilungen einschalten")) { Task { await store.setNotifications(!store.notificationsEnabled) } }
                         Button(L("Postfach verbinden")) { editing = nil; showAccount = true }
                     } label: { Image(systemName: "ellipsis") }
                 } else {
-                    Button { Task { await store.setNotifications(!store.notificationsEnabled) } } label: { Image(systemName: store.notificationsEnabled ? "bell.badge.fill" : "bell.slash") }.help(store.notificationsEnabled ? L("Mail-Mitteilungen ausschalten") : L("Mail-Mitteilungen einschalten"))
-                    Button { editing = nil; showAccount = true } label: { Image(systemName: "person.badge.plus") }.help(L("Postfach verbinden"))
+                    Button { Task { await store.setNotifications(!store.notificationsEnabled) } } label: { Image(systemName: store.notificationsEnabled ? "bell.badge.fill" : "bell.slash") }.yobroHelp(store.notificationsEnabled ? L("Mail-Mitteilungen ausschalten") : L("Mail-Mitteilungen einschalten"))
+                    Button { editing = nil; showAccount = true } label: { Image(systemName: "person.badge.plus") }.yobroHelp(L("Postfach verbinden"))
                     Button { compose = true } label: {
                         Label(L("Schreiben"), systemImage: "square.and.pencil")
                             .padding(.horizontal, 11)
                     }
                     .disabled(store.accounts.isEmpty)
-                    .help(L("Neue E-Mail verfassen", "Compose a new email"))
+                    .yobroHelp(L("Neue E-Mail verfassen", "Compose a new email"))
                 }
-                Button(action: close) { Image(systemName: "xmark") }.help(L("Zurück zum Browser"))
+                Button(action: close) { Image(systemName: "xmark") }.yobroHelp(L("Zurück zum Browser"))
             }.buttonStyle(YOBROButtonStyle()).padding(.horizontal, 16).frame(height: 52)
             Divider().opacity(0.4)
             ForEach(store.accounts.filter { store.lockedAccounts.contains($0.id) }) { account in
@@ -90,7 +90,7 @@ struct MailWorkspace: View {
                                         }.font(.system(size: 10)).padding(.horizontal, 9).padding(.vertical, 5)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .background(store.selectedFolder == folder.path ? moss.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                                    }.buttonStyle(YOBROButtonStyle(minimumSize: 30)).disabled(!folder.selectable).help(folder.displayTitle)
+                                    }.buttonStyle(YOBROButtonStyle(minimumSize: 30)).disabled(!folder.selectable).yobroHelp(folder.displayTitle)
                                 }.padding(.leading, 8)
                             }
                         }
@@ -300,7 +300,7 @@ struct MailWorkspace: View {
                                     Toggle(L("Externe Bilder laden"), isOn: Binding(
                                         get: { store.remoteImagesEnabled },
                                         set: { store.setRemoteImages($0) }
-                                    )).toggleStyle(.checkbox).help(L("Kann dem Absender das Öffnen der Nachricht melden."))
+                                    )).toggleStyle(.checkbox).yobroHelp(L("Kann dem Absender das Öffnen der Nachricht melden."))
                                 }
                             }.font(.system(size: 10)).padding(.horizontal, 20)
                         }
@@ -316,7 +316,7 @@ struct MailWorkspace: View {
                                                     Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)).foregroundStyle(.secondary)
                                                 }
                                             }.font(.system(size: 10)).padding(9).background(moss.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                                        }.buttonStyle(YOBROButtonStyle()).disabled(store.attachmentDownloads.contains(item.id + ":" + attachment.id)).help(L("Anhang speichern: ") + attachment.name)
+                                        }.buttonStyle(YOBROButtonStyle()).disabled(store.attachmentDownloads.contains(item.id + ":" + attachment.id)).yobroHelp(L("Anhang speichern: ") + attachment.name)
                                     }
                                 }.padding(.horizontal, 20)
                             }
@@ -381,7 +381,7 @@ struct MailAccountEditor: View {
                 Button { dismiss() } label: {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
                         .frame(width: 26, height: 26).background(ink.opacity(0.055), in: Circle())
-                }.buttonStyle(YOBROButtonStyle()).help(L("Schließen")).keyboardShortcut(.cancelAction).disabled(store.connecting)
+                }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("Schließen")).keyboardShortcut(.cancelAction).disabled(store.connecting)
             }.padding(26)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {

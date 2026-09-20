@@ -11,12 +11,15 @@
 
 #include "spike/SpikeWindow.hpp"
 
+class QWidget;
+
 #include "engine/qtwebengine/QtBrowserLibrary.hpp"
 #include "engine/qtwebengine/QtBrowserPage.hpp"
 #include "engine/qtwebengine/QtBrowserProfile.hpp"
 #include "spike/AdBlockRules.hpp"
 #include "spike/BridgePolicyStore.hpp"
 #include "spike/CertificateTrust.hpp"
+#include "spike/Icons.hpp"
 #include "spike/Localization.hpp"
 #include "spike/Theme.hpp"
 
@@ -114,6 +117,9 @@ namespace yobro::spike::windowSupport {
 [[nodiscard]] QString encodeIcon(const QIcon &icon);
 /// The reverse of encodeIcon; an empty icon for anything unreadable.
 [[nodiscard]] QIcon decodeIcon(const QString &encoded);
+/// Configures macOS borderless / full-size content window with transparent titlebar.
+void configureMacWindowFrame(QWidget *window);
+
 /// The start page markup, which differs between normal and private tabs.
 [[nodiscard]] QString diagnosticStartPage(bool privatePage);
 

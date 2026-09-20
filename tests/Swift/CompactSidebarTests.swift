@@ -293,6 +293,47 @@ final class CompactSidebarTests: XCTestCase {
     }
 
     @MainActor
+    func testOverlaySidebarDragStateKeepsOverlayVisible() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.sidebarAutoHide = true
+        model.showSidebar = false
+        model.sidebarOverlayVisible = false
+
+        let tab = model.newTab()
+        model.beginSidebarTabDrag(tab.id)
+        XCTAssertEqual(model.draggingTabID, tab.id)
+
+        model.finishSidebarDrag()
+        XCTAssertNil(model.draggingTabID)
+    }
+
+    @MainActor
+    func testTabDropPairingUnloadedOrSuspendedTabsResumesBothInSplitView() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Work")
+        let folder = try XCTUnwrap(model.folders.first)
+
+        let first = model.newTab(url: "https://first.example")
+        let second = model.newTab(url: "https://second.example")
+        model.moveToFolder(first.id, folder: folder.id)
+        model.moveToFolder(second.id, folder: folder.id)
+        model.closeSidebarTab(second.id) // suspends second
+
+        XCTAssertTrue(second.isSuspended)
+
+        // Drop first onto second in the middle zone to split
+        let paired = model.handleTabDrop(first.id, on: second.id, locationY: 22, rowHeight: 44)
+        XCTAssertTrue(paired)
+        XCTAssertFalse(first.isSuspended)
+        XCTAssertFalse(second.isSuspended)
+        XCTAssertTrue(model.splitPairs.contains { $0.contains(first.id) && $0.contains(second.id) })
+    }
+
+    @MainActor
     func testAddressEntrySelectsTheCompleteCurrentURL() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }

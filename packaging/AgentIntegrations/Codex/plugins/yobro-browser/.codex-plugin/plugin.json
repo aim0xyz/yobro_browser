@@ -1,0 +1,34 @@
+{
+  "name": "yobro-browser",
+  "version": "0.2.0",
+  "description": "Use the installed YOBRO browser through a local, profile-bound connection.",
+  "author": {
+    "name": "YOBRO"
+  },
+  "keywords": [
+    "browser",
+    "yobro",
+    "web",
+    "automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "YOBRO Browser",
+    "shortDescription": "Browse through your local YOBRO app.",
+    "longDescription": "Native local browser tools. Select a profile in YOBRO Settings \u2192 Agents. Page content requested by your agent is shared with its provider.",
+    "developerName": "YOBRO",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use YOBRO to look this up.",
+      "Open this page in YOBRO and summarize it.",
+      "Continue this task in the YOBRO browser."
+    ],
+    "brandColor": "#7C5CFC"
+  },
+  "mcpServers": "./.mcp.json"
+}

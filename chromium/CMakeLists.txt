@@ -63,11 +63,44 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     endif()
 endif()
 
-if(BUILD_TESTING)
-    add_test(
-        NAME chromium-theme-tokens
-        COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/ThemeTokenConformance.py"
-    )
+    if(BUILD_TESTING)
+        if(YOBRO_BUILD_QML_SHELL)
+            # Visual acceptance for the QML shell: deterministic captures of
+            # the start page in light and dark, compared against the WebKit
+            # reference captures. The diff is a warning system with masks and
+            # tolerances, not a blind pixel target (PLAN.md Phase 1).
+            add_test(
+                NAME chromium-qml-shell-capture
+                COMMAND python3
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/QmlShellCapture.py"
+                    $<TARGET_FILE:yobro-chromium-qml>
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
+                    "${CMAKE_CURRENT_BINARY_DIR}/qml-capture"
+            )
+            set_tests_properties(chromium-qml-shell-capture PROPERTIES
+                ENVIRONMENT "YOBRO_LANGUAGE=en;QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;QT_SCALE_FACTOR=2"
+                TIMEOUT 300
+            )
+
+            # One real navigation through the model: a file:// page must reach
+            # the WebEngineView and paint instead of the start page.
+            add_test(
+                NAME chromium-qml-shell-navigation
+                COMMAND python3
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/QmlShellNavigation.py"
+                    $<TARGET_FILE:yobro-chromium-qml>
+                    "${CMAKE_CURRENT_BINARY_DIR}/qml-capture"
+            )
+            set_tests_properties(chromium-qml-shell-navigation PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu"
+                TIMEOUT 300
+            )
+        endif()
+
+        add_test(
+            NAME chromium-theme-tokens
+            COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/ThemeTokenConformance.py"
+        )
     set_tests_properties(chromium-theme-tokens PROPERTIES TIMEOUT 30)
 
     add_executable(yobro-webkit-import-tests
@@ -102,8 +135,7 @@ endif()
 
 if(YOBRO_BUILD_QT_SPIKE)
     find_package(Qt6 ${YOBRO_QT_VERSION} EXACT REQUIRED COMPONENTS
-        Core Gui Network PrintSupport Test WebChannel Widgets WebEngineCore WebEngineWidgets
-    )
+        Core Gui Network PrintSupport Svg Test WebChannel Widgets WebEngineCore WebEngineWidgets)
     qt_standard_project_setup()
 
     set(AGENT_BRIDGE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../Sources/YOBRO/Resources/AgentBridge.js")
@@ -268,6 +300,13 @@ if(YOBRO_BUILD_QT_SPIKE)
     # The window is one class spread over several translation units, so every
     # target that builds the shell needs all of its parts. Listing them once
     # keeps a new part from silently missing in one target.
+set(ICON_RESOURCES "")
+    file(GLOB YOBRO_ICON_FILES "${CMAKE_CURRENT_SOURCE_DIR}/spike/icons/*.svg")
+    foreach(icon_file IN LISTS YOBRO_ICON_FILES)
+        get_filename_component(icon_name "${icon_file}" NAME)
+        set_source_files_properties("${icon_file}" PROPERTIES QT_RESOURCE_ALIAS "icons/${icon_name}")
+        list(APPEND ICON_RESOURCES "${icon_file}")
+    endforeach()
     set(YOBRO_SPIKE_WINDOW_SOURCES
         spike/SpikeWindow.cpp
         spike/SpikeWindowAssistant.cpp
@@ -286,6 +325,8 @@ if(YOBRO_BUILD_QT_SPIKE)
         spike/SpikeWindowSync.cpp
         spike/SpikeWindowWorkspace.cpp
         spike/SpikeWindowInternal.hpp
+        spike/Icons.cpp
+        spike/Icons.hpp
     )
     add_library(yobro_qtwebengine STATIC
         engine/qtwebengine/QtBrowserLibrary.cpp
@@ -332,12 +373,13 @@ if(YOBRO_BUILD_QT_SPIKE)
     )
     qt_add_resources(yobro-chromium-spike "yobro_shared_resources"
         PREFIX "/yobro"
-        FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+        FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
     )
     target_include_directories(yobro-chromium-spike PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     target_link_libraries(yobro-chromium-spike PRIVATE
+        Qt6::Svg
         yobro_bridge_policy
         yobro_qtwebengine
         yobro_local_transport
@@ -373,6 +415,95 @@ if(YOBRO_BUILD_QT_SPIKE)
         set_target_properties(yobro-chromium-spike PROPERTIES
             OUTPUT_NAME "yobro-chromium-feasibility"
         )
+    endif()
+
+    # The Qt Quick shell is the migration target for the product surface. It
+    # stays a separate application behind its own build switch until the QML
+    # view has taken over each visible function (see PLAN.md); the widget
+    # shell remains the functional reference meanwhile.
+    if(YOBRO_BUILD_QML_SHELL)
+        find_package(Qt6 ${YOBRO_QT_VERSION} EXACT REQUIRED COMPONENTS
+            Qml Quick QuickControls2 WebEngineQuick)
+
+        set(YOBRO_MARK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../Sources/YOBRO/Resources/YOBROMark.png")
+        if(NOT EXISTS "${YOBRO_MARK_SOURCE}")
+            message(FATAL_ERROR "Shared YOBROMark.png is missing: ${YOBRO_MARK_SOURCE}")
+        endif()
+        configure_file("${YOBRO_MARK_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/resources/YOBROMark.png" COPYONLY)
+        set(YOBRO_MARK_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/resources/YOBROMark.png")
+        set_source_files_properties("${YOBRO_MARK_RESOURCE}" PROPERTIES QT_RESOURCE_ALIAS "YOBROMark.png")
+
+        qt_add_executable(yobro-chromium-qml
+            spike/qml/QmlShellMain.cpp
+            spike/qml/QmlTheme.cpp
+            spike/qml/QmlTheme.hpp
+            spike/qml/QmlImageProviders.cpp
+            spike/qml/QmlImageProviders.hpp
+            spike/qml/QmlBrowserModel.cpp
+            spike/qml/QmlBrowserModel.hpp
+            spike/qml/QmlShellSupport.cpp
+            spike/qml/QmlShellSupport.hpp
+        )
+        # The QML files live under spike/qml/ on disk but must be flat types
+        # in the Yobro.Shell module, so each file gets an alias at module root.
+        set(YOBRO_QML_SHELL_QML
+            spike/qml/Main.qml
+            spike/qml/Sidebar.qml
+            spike/qml/BrowserPane.qml
+            spike/qml/StartPage.qml
+        )
+        foreach(yobro_qml_file IN LISTS YOBRO_QML_SHELL_QML)
+            get_filename_component(yobro_qml_name "${yobro_qml_file}" NAME)
+            set_source_files_properties("${yobro_qml_file}" PROPERTIES
+                QT_RESOURCE_ALIAS "${yobro_qml_name}"
+            )
+        endforeach()
+        qt_add_qml_module(yobro-chromium-qml
+            URI Yobro.Shell
+            VERSION 1.0
+            RESOURCE_PREFIX /qt/qml
+            QML_FILES ${YOBRO_QML_SHELL_QML}
+        )
+        qt_add_resources(yobro-chromium-qml "yobro_qml_shell_resources"
+            PREFIX "/yobro"
+            FILES "${YOBRO_MARK_RESOURCE}" ${ICON_RESOURCES} ${LOCALIZATION_RESOURCES}
+        )
+        target_include_directories(yobro-chromium-qml PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+        target_link_libraries(yobro-chromium-qml PRIVATE
+            yobro_bridge_policy
+            yobro_chromium_core
+            Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::WebEngineQuick Qt6::Svg
+        )
+        target_compile_definitions(yobro-chromium-qml PRIVATE
+            YOBRO_CHROMIUM_VERSION="${PROJECT_VERSION}"
+        )
+
+        if(MSVC)
+            target_compile_options(yobro-chromium-qml PRIVATE /W4 /permissive-)
+        else()
+            target_compile_options(yobro-chromium-qml PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+
+        if(APPLE)
+            set_target_properties(yobro-chromium-qml PROPERTIES
+                OUTPUT_NAME "YOBRO Chromium QML"
+                MACOSX_BUNDLE TRUE
+                MACOSX_BUNDLE_GUI_IDENTIFIER "bro.yobro.chromium.qml"
+                MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+            )
+        elseif(WIN32)
+            set_target_properties(yobro-chromium-qml PROPERTIES
+                OUTPUT_NAME "YOBRO-Chromium-QML"
+                WIN32_EXECUTABLE TRUE
+            )
+        else()
+            set_target_properties(yobro-chromium-qml PROPERTIES
+                OUTPUT_NAME "yobro-chromium-qml"
+            )
+        endif()
     endif()
 
     if(BUILD_TESTING)
@@ -424,7 +555,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-webkit-import-tests "yobro_import_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-webkit-import-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -432,6 +563,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-webkit-import-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -451,6 +583,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         target_link_libraries(yobro-qt-bookmark-tests PRIVATE
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -467,7 +600,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-chrome-store-tests "yobro_chrome_store_test_resources"
             PREFIX "/yobro"
-            FILES ${LOCALIZATION_RESOURCES}
+            FILES ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-chrome-store-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -490,7 +623,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-sync-tests "yobro_sync_test_resources"
             PREFIX "/yobro"
-            FILES ${LOCALIZATION_RESOURCES}
+            FILES ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-sync-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -513,7 +646,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-mail-tests "yobro_mail_test_resources"
             PREFIX "/yobro"
-            FILES "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-mail-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -539,7 +672,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-space-chat-tests "yobro_space_chat_test_resources"
             PREFIX "/yobro"
-            FILES ${LOCALIZATION_RESOURCES}
+            FILES ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-space-chat-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -565,7 +698,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-browser-data-import-tests "yobro_browser_data_import_test_resources"
             PREFIX "/yobro"
-            FILES "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-browser-data-import-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -588,7 +721,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-password-import-tests "yobro_password_import_test_resources"
             PREFIX "/yobro"
-            FILES "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-password-import-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -636,6 +769,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         target_link_libraries(yobro-qt-space-proxy-tests PRIVATE
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -655,6 +789,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         target_link_libraries(yobro-qt-certificate-tests PRIVATE
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -674,6 +809,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         target_link_libraries(yobro-qt-adblock-tests PRIVATE
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -694,6 +830,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-privacy-tests PRIVATE
             yobro_qtwebengine
             yobro_bridge_policy
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -726,7 +863,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-localization-tests "yobro_localization_test_resources"
             PREFIX "/yobro"
-            FILES ${LOCALIZATION_RESOURCES}
+            FILES ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-localization-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -757,7 +894,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-web-appearance-tests "yobro_appearance_test_resources"
             PREFIX "/yobro"
-            FILES ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} ${LOCALIZATION_RESOURCES}
+            FILES ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-web-appearance-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -765,6 +902,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-web-appearance-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -783,7 +921,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-session-restore-tests "yobro_session_restore_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-session-restore-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -791,6 +929,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-session-restore-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -809,7 +948,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-passkey-tests "yobro_passkey_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-passkey-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -817,6 +956,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-passkey-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -835,7 +975,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-sync-ui-tests "yobro_sync_ui_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-sync-ui-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -843,6 +983,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-sync-ui-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -861,7 +1002,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-onboarding-tests "yobro_onboarding_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-onboarding-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -869,6 +1010,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-onboarding-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -887,7 +1029,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-mail-ui-tests "yobro_mail_ui_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-mail-ui-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -895,6 +1037,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-mail-ui-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -913,7 +1056,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-space-chat-ui-tests "yobro_space_chat_ui_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-space-chat-ui-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -921,6 +1064,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-space-chat-ui-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -938,7 +1082,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-screen-share-tests "yobro_screen_share_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-screen-share-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -946,6 +1090,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-screen-share-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -963,7 +1108,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-login-autofill-tests "yobro_login_autofill_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-login-autofill-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -971,6 +1116,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-login-autofill-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -991,7 +1137,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-agent-log-tests "yobro_agent_log_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-agent-log-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -999,6 +1145,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-agent-log-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -1014,13 +1161,14 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-popup-ownership-tests "yobro_popup_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}"
+            FILES "${AGENT_BRIDGE_RESOURCE}" ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-popup-ownership-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
         )
         target_link_libraries(yobro-qt-popup-ownership-tests PRIVATE
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -1039,7 +1187,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         qt_add_resources(yobro-qt-permission-tests "yobro_permission_test_resources"
             PREFIX "/yobro"
-            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+            FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
         )
         target_include_directories(yobro-qt-permission-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -1047,6 +1195,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         target_link_libraries(yobro-qt-permission-tests PRIVATE
             yobro_bridge_policy
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -1066,6 +1215,7 @@ if(YOBRO_BUILD_QT_SPIKE)
         )
         target_link_libraries(yobro-qt-extension-tests PRIVATE
             yobro_qtwebengine
+            Qt6::Svg
             Qt6::Test
         )
         add_test(
@@ -1083,14 +1233,15 @@ if(YOBRO_BUILD_QT_SPIKE)
             )
             qt_add_resources(yobro-qt-renderer-recovery-tests "yobro_renderer_recovery_test_resources"
                 PREFIX "/yobro"
-                FILES "${AGENT_BRIDGE_RESOURCE}"
+                FILES "${AGENT_BRIDGE_RESOURCE}" ${ICON_RESOURCES}
             )
             target_include_directories(yobro-qt-renderer-recovery-tests PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}"
             )
             target_link_libraries(yobro-qt-renderer-recovery-tests PRIVATE
                 yobro_qtwebengine
-                Qt6::Test
+                Qt6::Svg
+            Qt6::Test
             )
             add_test(
                 NAME chromium-renderer-recovery
@@ -1108,7 +1259,7 @@ if(YOBRO_BUILD_QT_SPIKE)
             )
             qt_add_resources(yobro-qt-download-lifecycle-tests "yobro_download_lifecycle_test_resources"
                 PREFIX "/yobro"
-                FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES}
+                FILES "${AGENT_BRIDGE_RESOURCE}" "${LOGIN_AUTOFILL_RESOURCE}" "${PASSKEY_SHIM_RESOURCE}" ${APPEARANCE_RESOURCES} ${ADBLOCK_RESOURCES} "${IMPORT_WORKER_RESOURCE}" "${MAIL_WORKER_RESOURCE}" ${LOCALIZATION_RESOURCES} ${ICON_RESOURCES}
             )
             target_include_directories(yobro-qt-download-lifecycle-tests PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -1116,7 +1267,8 @@ if(YOBRO_BUILD_QT_SPIKE)
             target_link_libraries(yobro-qt-download-lifecycle-tests PRIVATE
                 yobro_bridge_policy
                 yobro_qtwebengine
-                Qt6::Test
+                Qt6::Svg
+            Qt6::Test
             )
             add_test(
                 NAME chromium-download-lifecycle
@@ -1132,7 +1284,7 @@ if(YOBRO_BUILD_QT_SPIKE)
             )
             qt_add_resources(yobro-qt-protocol-integration-tests "yobro_protocol_test_resources"
                 PREFIX "/yobro"
-                FILES "${AGENT_BRIDGE_RESOURCE}"
+                FILES "${AGENT_BRIDGE_RESOURCE}" ${ICON_RESOURCES}
             )
             target_include_directories(yobro-qt-protocol-integration-tests PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}"

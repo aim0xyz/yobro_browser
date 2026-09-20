@@ -49,6 +49,13 @@ struct ThemePalette {
     QString surfaceRaised;   // field
     QString surfaceHover;    // hoverWash
     QString surfacePressed;  // pressedWash
+    QString surfaceAgent;
+    QString surfaceLibrary;
+    QString surfaceSearchRow;
+    QString spaceChatPanel;
+    QString surfaceTreeSelected;
+    QString surfaceTreeHover;
+    QString surfacePopupButton;
     QString borderStrong;    // border
     QString accent;          // moss
     QString selection;       // selectionWash

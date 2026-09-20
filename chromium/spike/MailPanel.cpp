@@ -670,7 +670,7 @@ void MailPanel::showAccountForm() {
             return;
         }
         connectButton->setEnabled(false);
-        store_.connectAccount(account, password->text(), [=](QString problem) {
+        store_.connectAccount(account, password->text(), [=, this](QString problem) {
             if (!problem.isEmpty()) {
                 explanation->setText(problem);
                 connectButton->setEnabled(true);

@@ -161,6 +161,13 @@ ThemePalette buildPalette(const WebKitTokens &tokens) {
     palette.surfaceRaised = palette.field;
     palette.surfaceHover = palette.hoverWash;
     palette.surfacePressed = palette.pressedWash;
+    palette.surfaceAgent = rgba(palette.surface, 0.32);
+    palette.surfaceLibrary = rgba(palette.surface, 0.20);
+    palette.surfaceSearchRow = rgba(palette.surface, 0.50);
+    palette.spaceChatPanel = rgba(palette.chromeBottom, 0.90);
+    palette.surfaceTreeSelected = rgba(palette.surface, 0.75);
+    palette.surfaceTreeHover = rgba(palette.surface, 0.24);
+    palette.surfacePopupButton = rgba(palette.surface, 0.72);
     palette.borderStrong = palette.border;
     palette.accent = palette.moss;
     palette.selection = palette.selectionWash;
@@ -176,7 +183,7 @@ ThemePalette buildPalette(const WebKitTokens &tokens) {
 
 QString gradient() {
     return QStringLiteral(
-        "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %1,stop:1 %2)");
+        "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 %1,stop:1 %2)");
 }
 
 } // namespace
@@ -237,30 +244,37 @@ QString windowStyleSheet(bool dark) {
         "#topNavigation{background:transparent;border:0;border-radius:0;padding:0;}"
         "#topNavigation QPushButton{font-size:15px;min-width:30px;min-height:30px;padding:0;border-radius:9px;color:%6;}"
         "#productBrand{font-family:'SF Pro Rounded','SF Pro Text',-apple-system;font-size:29px;font-weight:600;letter-spacing:-1.4px;color:%6;}"
-        "#productPreview{color:%8;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:8px;letter-spacing:1.5px;}"
+        "#productPreview{color:%17;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:8px;letter-spacing:1px;}"
         "#productBrandMark{font-family:'SF Pro Rounded','SF Pro Text',-apple-system;font-size:30px;color:%8;font-weight:800;}"
-        "#sidebarSearchRow{background:%2;border:1px solid %11;border-radius:10px;}"
+        "#sidebarSearchRow{background:%15;border:1px solid %10;border-radius:12px;}"
         "#topAddress{background:transparent;border:0;border-radius:10px;padding:9px 2px;color:%6;selection-background-color:%9;font-size:13px;font-weight:600;}"
         "#loginFillButton,#appearanceButton{background:transparent;border:0;border-radius:7px;min-width:26px;min-height:26px;padding:0;color:%7;font-size:13px;}"
         "#loginFillButton:hover,#appearanceButton:hover{background:%4;color:%6;}"
-        "#sidebarSectionLabel{color:%7;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:9px;letter-spacing:1.8px;padding:12px 3px 6px;}"
+        "#sidebarMailButton{background:transparent;border:0;border-radius:9px;min-height:34px;padding:6px 9px;color:%6;text-align:left;font-size:12px;font-weight:600;}"
+        "#sidebarMailButton:hover{background:%4;}"
+        "#spaceStrip{background:%14;border:1px solid %10;border-radius:10px;min-height:32px;max-height:32px;padding:0 6px;}"
+        "#spaceStripButton{background:transparent;border:0;color:%6;font-size:11px;font-weight:600;text-align:left;padding:0 4px;}"
+        "#spaceStripButton:hover{background:transparent;}"
+        "#spaceStripAddButton{background:transparent;border:0;border-radius:6px;min-width:22px;max-width:22px;min-height:22px;max-height:22px;padding:0;color:%7;font-size:14px;}"
+        "#spaceStripAddButton:hover{background:%4;color:%6;}"
+        "#sidebarSectionLabel{color:%7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-weight:600;font-size:9px;letter-spacing:1.4px;padding:23px 0px 9px 10px;}"
         "#workspaceTree{background:transparent;border:0;padding:0;color:%6;outline:0;}"
-        "#workspaceTree::item{padding:5px 9px;border-radius:9px;margin:2px 0;min-height:34px;}"
-        "#workspaceTree::item:hover{background:%4;}"
-        "#workspaceTree::item:selected{background:%9;color:%6;}"
+        "#workspaceTree::item{padding:5px 9px;border-radius:9px;margin:2px 0;min-height:38px;}"
+        "#workspaceTree::item:hover{background:%18;}"
+        "#workspaceTree::item:selected{background:%19;color:%6;}"
         "#workspaceTree::branch{background:transparent;}"
         // Sidebar action rows and library icons.
-        "#sidebarTabActions QPushButton{background:transparent;border:0;text-align:left;color:%7;font-size:12px;min-height:30px;padding:5px 7px;border-radius:8px;}"
-        "#sidebarTabActions QPushButton:hover{background:%4;color:%6;}"
+        "#sidebarTabActions QPushButton,#sidebarNewTabButton,#sidebarNewNoteButton,#sidebarPrivateTabButton{background:transparent;border:0;text-align:left;color:%7;font-size:12px;min-height:28px;padding:4px 8px;border-radius:8px;font-weight:500;}"
+        "#sidebarTabActions QPushButton:hover,#sidebarNewTabButton:hover,#sidebarNewNoteButton:hover,#sidebarPrivateTabButton:hover{background:%4;color:%6;}"
         "#sidebarSpaceActions,#sidebarFolderActions{background:transparent;border:0;border-radius:0;padding:0;}"
         "#sidebarPageActions{background:transparent;border:0;border-radius:0;padding:0;}"
         "#sidebarPageActions QPushButton{background:transparent;border:0;border-radius:8px;color:%7;min-height:28px;}"
         "#sidebarPageActions QPushButton:hover{background:%4;color:%6;}"
-        "#sidebarLibraryActions{background:%2;border:1px solid %11;border-radius:10px;padding:3px;}"
-        "#sidebarLibraryActions QPushButton{color:%6;font-size:12px;font-weight:600;min-height:28px;text-align:center;border-radius:8px;background:transparent;border:0;}"
-        "#sidebarLibraryActions QPushButton:hover{background:%4;}"
+        "#sidebarLibraryActions,#sidebarLibraryBar{background:%13;border:0;border-radius:10px;padding:3px;}"
+        "#sidebarLibraryActions QPushButton,#sidebarLibraryBar QPushButton{color:%6;font-size:12px;font-weight:600;min-height:28px;text-align:center;border-radius:8px;background:transparent;border:0;}"
+        "#sidebarLibraryActions QPushButton:hover,#sidebarLibraryBar QPushButton:hover{background:%4;}"
         "#libraryButton{background:transparent;border:0;min-height:30px;text-align:center;padding:0 8px;color:%6;font-size:12px;font-weight:600;border-radius:8px;}"
-        "#sidebarAgentCard{background:%2;border:1px solid %11;border-radius:12px;}"
+        "#sidebarAgentCard{background:%14;border:1px solid %10;border-radius:12px;padding:8px 10px;}"
         "#agentPaneToggle{background:transparent;border:0;color:%6;font-size:12px;font-weight:600;text-align:left;padding:0;}"
         "#agentPaneToggle:hover{background:transparent;border:0;color:%6;}"
         "#sidebarProfileFooter{color:%7;font-size:12px;font-weight:600;padding:7px 8px;background:transparent;border:0;text-align:left;border-radius:9px;}"
@@ -273,13 +287,37 @@ QString windowStyleSheet(bool dark) {
         "QPushButton:hover{background:%4;border-color:%12;}"
         "QPushButton:pressed{background:%5;border-color:%12;}"
         "QPushButton:disabled{color:%7;background:transparent;}"
-        "QComboBox{background:%2;border:0;border-radius:9px;padding:7px 8px;color:%6;font-weight:600;}"
+        "QComboBox{background:%20;border:1px solid %12;border-radius:9px;padding:7px 8px;color:%6;font-weight:600;}"
         "QComboBox::drop-down{border:0;width:20px;}"
         "#browserStatus{color:%7;padding:2px 9px;font-size:11px;}"
         "#findBar{background:%3;border:1px solid %11;border-radius:12px;}"
         "#findStatus{color:%7;font-size:11px;}"
-        "#agentPane{background:%3;color:%6;}"
+        "#agentPane{background:transparent;color:%6;}"
         "#agentPaneLabel{color:%8;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:10px;letter-spacing:0.8px;}"
+        "#agentWebHost{background:%3;border:1px solid %10;border-radius:14px;}"
+        "#agentQuickAccess{background:%2;border:1px solid %17;border-radius:6px;color:%17;font-family:'SF Pro Rounded','SF Pro Text',-apple-system;font-size:7px;font-weight:700;letter-spacing:0.4px;padding:8px 0px;margin-right:2px;}"
+        "#agentQuickAccess:checked{background:%17;color:%3;border:0;}"
+        "#agentQuickAccess:hover{background:%4;}"
+
+        "#spaceChatPanel{background:%16;border-radius:0;}"
+        "#spaceChatHeader{background:transparent;border-bottom:1px solid %10;padding:22px 10px 10px 10px;}"
+        "#spaceChatAgentLabel{color:%17;font-family:'SF Pro Rounded','SF Pro Text',-apple-system;font-size:9px;font-weight:700;letter-spacing:1.3px;}"
+        "#spaceChatHeading{font-family:'SF Pro Rounded','SF Pro Text',-apple-system;font-size:16px;font-weight:600;color:%6;}"
+        "#spaceChatStatusPill{background:%14;border:1px solid %10;border-radius:12px;padding:2px 8px;font-size:9px;font-weight:600;color:%6;}"
+        "#spaceChatCircleButton{background:%14;border:0;border-radius:15px;min-width:30px;max-width:30px;min-height:30px;max-height:30px;padding:0;color:%6;}"
+        "#spaceChatCircleButton:hover{background:%4;}"
+        "#spaceChatTimeline{background:transparent;border:0;outline:0;color:%6;}"
+        "#spaceChatTimeline::item{border-radius:13px;margin:3px 0;padding:8px 10px;background:transparent;}"
+        "#spaceChatTimeline::item:hover{background:transparent;}"
+        "#spaceChatTimeline::item:selected{background:transparent;}"
+        "#spaceChatComposerCard{background:%2;border:1px solid %10;border-radius:14px;padding:8px 10px;}"
+        "#spaceChatInput{background:transparent;border:0;color:%6;font-size:12px;}"
+        "#spaceChatSendButton{background:%17;border:0;border-radius:15px;min-width:30px;max-width:30px;min-height:30px;max-height:30px;padding:0;color:%3;font-weight:700;}"
+        "#spaceChatSendButton:disabled{background:%14;color:%7;}"
+        "#spaceChatNotice{background:%14;border:1px solid %10;border-radius:9px;padding:8px 10px;color:%8;font-size:9px;font-weight:500;}"
+        "#spaceChatNoticeLocal{background:%14;border:1px solid %10;border-radius:9px;padding:8px 10px;color:%17;font-size:9px;font-weight:500;}"
+        "#spaceChatDisclosureHeader{background:transparent;border:0;text-align:left;color:%6;font-size:10px;font-weight:500;padding:4px 0;}"
+        "#spaceChatDisclosureContent{color:%7;font-size:9px;padding:2px 0 6px 16px;}"
     ).arg(
         gradient().arg(colors.chromeTop, colors.chromeBottom),  // %1 window gradient
         colors.surface,        // %2
@@ -292,7 +330,15 @@ QString windowStyleSheet(bool dark) {
         colors.selectionWash,  // %9
         colors.borderHairline, // %10
         colors.borderField,    // %11
-        colors.borderSoft      // %12
+        colors.borderSoft,     // %12
+        colors.surfaceLibrary, // %13
+        colors.surfaceAgent,   // %14
+        colors.surfaceSearchRow, // %15
+        colors.spaceChatPanel, // %16
+        colors.moss,           // %17
+        colors.surfaceTreeHover, // %18
+        colors.surfaceTreeSelected, // %19
+        colors.surfacePopupButton  // %20
     );
 }
 

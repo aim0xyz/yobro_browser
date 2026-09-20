@@ -57,11 +57,10 @@ final class FaviconStore {
         if let image = cache[address] { return image }
         guard let url = URL(string: address), ["http", "https"].contains(url.scheme ?? "") else { return nil }
         do {
-            let (bytes, response) = try await session.bytes(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200, response.expectedContentLength <= 1024 * 1024 else { return nil }
-            var data = Data()
-            for try await byte in bytes { data.append(byte); if data.count > 1024 * 1024 { break } }
-            guard data.count <= 1024 * 1024, let image = NSImage(data: data) else { return nil }
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  data.count <= 1024 * 1024,
+                  let image = NSImage(data: data) else { return nil }
             if cache.count > 250 { cache.removeAll() }
             cache[address] = image
             return image

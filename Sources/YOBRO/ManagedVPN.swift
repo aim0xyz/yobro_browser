@@ -3,7 +3,7 @@ import Network
 import Security
 import WebKit
 
-struct ManagedVPNLocation: Identifiable, Equatable {
+struct ManagedVPNLocation: Identifiable, Equatable, Codable {
     let id: String
     let countryCode: String
     let city: String
@@ -80,9 +80,8 @@ final class ManagedVPNStore: ObservableObject {
     static let localHost = "127.0.0.1"
     static let localPort: UInt16 = 17890
 
-    let locations = [
-        ManagedVPNLocation(id: "ca-montreal", countryCode: "CA", city: "Montréal", flag: "🇨🇦", expectedExitIP: "15.175.21.24")
-    ]
+    // Provisioned on the user's device, never compiled into a distributable app.
+    @Published private(set) var locations: [ManagedVPNLocation]
     let home: URL
     @Published private(set) var status: ManagedVPNStatus = .disconnected
     @Published private(set) var selectedLocationID: String?
@@ -115,36 +114,42 @@ final class ManagedVPNStore: ObservableObject {
 
     init(home: URL) {
         self.home = home
+        locations = (try? Data(contentsOf: home.appendingPathComponent("managed-vpn-locations.json")))
+            .flatMap { try? JSONDecoder().decode([ManagedVPNLocation].self, from: $0) } ?? []
         if let data = try? Data(contentsOf: selectionFile),
            let saved = try? JSONDecoder().decode([String: String].self, from: data),
-           let id = saved["location"], locations.contains(where: { $0.id == id }) {
+           let id = saved["location"] {
             selectedLocationID = id
-        } else if let location = locations.first,
-                  let bootstrapPath = ProcessInfo.processInfo.environment["YOBRO_VPN_BOOTSTRAP_FIFO"] {
-            let bootstrapURL = URL(fileURLWithPath: bootstrapPath)
-            defer { try? FileManager.default.removeItem(at: bootstrapURL) }
-            do {
-                let handle = try FileHandle(forReadingFrom: bootstrapURL)
-                let data = try handle.readToEnd() ?? Data()
-                try handle.close()
-                guard let key = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      key.hasPrefix("ss://") else {
-                    throw YOBROError.message("Invalid Outline bootstrap payload")
-                }
-                try ManagedVPNSecrets.store(key, locationID: location.id, home: home)
-                selectedLocationID = location.id
-                try? "STORED".write(toFile: "/private/tmp/yobro-vpn-bootstrap.status", atomically: true, encoding: .utf8)
-            } catch {
-                try? "ERROR \(error.localizedDescription)".write(toFile: "/private/tmp/yobro-vpn-bootstrap.status", atomically: true, encoding: .utf8)
-            }
         }
     }
 
     func restore(to dataStore: WKWebsiteDataStore) async {
-        guard let selectedLocationID,
-              let location = locations.first(where: { $0.id == selectedLocationID }) else { return }
+        guard let selectedLocationID else { return }
+        guard let location = locations.first(where: { $0.id == selectedLocationID }) else {
+            status = .failed(L("Die lokale VPN-Konfiguration fehlt. Richte sie erneut ein oder schalte das VPN ausdrücklich aus.", "Local VPN configuration is missing. Set it up again or explicitly turn the VPN off."))
+            return
+        }
         do { try await connect(location, to: dataStore) }
         catch { status = .failed(error.localizedDescription) }
+    }
+
+    func provision(city: String, countryCode: String, expectedExitIP: String, accessKey: String) throws {
+        let city = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let country = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let ip = expectedExitIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = accessKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !city.isEmpty, city.count <= 60, country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil,
+              IPv4Address(ip) != nil || IPv6Address(ip) != nil,
+              key.hasPrefix("ss://"), key.count > 10, key.count < 8192, !key.contains("\n"), !key.contains("\r") else {
+            throw YOBROError.message(L("Prüfe Namen, zweistelligen Ländercode, Ausgangs-IP und Outline-Zugangsschlüssel.", "Check the name, two-letter country code, exit IP, and Outline access key."))
+        }
+        let location = ManagedVPNLocation(id: UUID().uuidString, countryCode: country, city: city, flag: "🌐", expectedExitIP: ip)
+        try ManagedVPNSecrets.store(key, locationID: location.id, home: home)
+        let updated = locations + [location]
+        let file = home.appendingPathComponent("managed-vpn-locations.json")
+        try JSONEncoder().encode(updated).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        locations = updated
     }
 
     func connect(_ location: ManagedVPNLocation, to dataStore: WKWebsiteDataStore) async throws {
@@ -185,7 +190,7 @@ final class ManagedVPNStore: ObservableObject {
         }
         guard verified else {
             shutdownProcess()
-            throw YOBROError.message(L("Der Server antwortet, aber nicht mit der erwarteten kanadischen IP.", "The server responded without the expected Canadian IP."))
+            throw YOBROError.message(L("Der Server antwortet nicht mit dem erwarteten Standort und der erwarteten IP.", "The server did not return the expected location and IP."))
         }
         dataStore.proxyConfigurations = [proxy]
         selectedLocationID = location.id

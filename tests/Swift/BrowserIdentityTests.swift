@@ -3,6 +3,13 @@ import WebKit
 @testable import YOBRO
 
 final class BrowserIdentityTests: XCTestCase {
+    func testCatalogIdentityIsStrictlyScoped() {
+        XCTAssertNotNil(BrowserIdentity.catalogUserAgent(for: URL(string: "https://chromewebstore.google.com/category/extensions")))
+        for value in ["https://example.com", "https://accounts.google.com", "https://chromewebstore.google.com.evil.example", "http://chromewebstore.google.com"] {
+            XCTAssertNil(BrowserIdentity.catalogUserAgent(for: URL(string: value)))
+        }
+    }
+
     func testBrowserIdentifiesAsInstalledSafari() {
         let configuration = WKWebViewConfiguration()
         BrowserIdentity.configure(configuration)

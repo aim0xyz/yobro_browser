@@ -212,7 +212,7 @@ void checkWindowOpens(SpikeWindow &window) {
     check(action != nullptr, "There is no menu command for mail.");
     check(action->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M),
           "The mail command is not on ⇧⌘M.");
-    check(window.findChild<QPushButton *>(QStringLiteral("mailButton")) != nullptr,
+    check(window.findChild<QPushButton *>(QStringLiteral("sidebarMailButton")) != nullptr,
           "There is no sidebar button for mail.");
 
     action->trigger();

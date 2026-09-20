@@ -2,6 +2,13 @@ import Foundation
 import WebKit
 
 enum BrowserIdentity {
+    /// The store otherwise redirects Safari/WebKit to /unsupported. This only
+    /// enables browsing the catalog; extension APIs still come from WebKit.
+    static func catalogUserAgent(for url: URL?) -> String? {
+        guard url?.scheme == "https", url?.host?.lowercased() == "chromewebstore.google.com" else { return nil }
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+    }
+
     /// Google Identity Services can still paint its One Tap iframe after a
     /// WKWebView has identified itself as Safari, but Google deliberately does
     /// not support completing that flow in web views. The result is a visible,

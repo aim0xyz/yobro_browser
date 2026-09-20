@@ -1,0 +1,12 @@
+uBlock Origin Lite, Raymond Hill and contributors
+Based on official Safari release: 2026.914.1325
+YoBro compatibility version: 2026.914.1325.1
+https://github.com/uBlockOrigin/uBOL-home/releases/tag/2026.914.1325
+Source: https://github.com/gorhill/uBlock/tree/master/platform/mv3
+License: GNU GPL version 3; complete license and upstream README are inside uBlockOriginLite.safari.zip.
+The Safari package requires Safari/WebKit 18.6 (macOS 15.6) or later.
+YoBro modification: js/ext.js recognizes webkit-extension: as Safari, not Chromium.
+Manifest version incremented to reinitialize filtering rules. Filter lists are unchanged.
+Reproducible patch: scripts/prepare-bundled-ublock.py (repository root).
+Upstream SHA-256: f6d5190ad8df4c80d11e19cdf69cd0b0eefb1d1facbc82cb2d5262d3b88cab69
+Bundled SHA-256: f551e1168334ce1e65b1d96aae952446cc0dbaa221360ad14e31cd9c86aae927

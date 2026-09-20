@@ -16,6 +16,7 @@ struct YOBROApp: App {
                 .tint(moss)
                 .onAppear {
                     browser.startBridge(); browser.mail.startPolling()
+                    browser.updates.start()
                     browser.showOnboarding = !OnboardingProgress.isComplete(home: browser.home)
                     delegate.mail = browser.mail
                     delegate.browser = browser
@@ -27,7 +28,9 @@ struct YOBROApp: App {
                     browser.persistSession()
                 }
                 .onOpenURL { url in
-                    if ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                    if SupabaseAuthClient.isAuthURL(url) {
+                        Task { await browser.sync.handleAuthURL(url, model: browser) }
+                    } else if ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                         browser.newTab(url: url.absoluteString)
                         NSApp.activate(ignoringOtherApps: true)
                     } else {
@@ -57,6 +60,8 @@ struct YOBROApp: App {
                     browser.focusAddress = true
                 }.keyboardShortcut("l")
                 Button(L("Schnellsuche")) { browser.showPalette = true }.keyboardShortcut("k")
+                Button(L("Nach Updates suchen …", "Check for Updates…")) { browser.updates.installAvailableUpdate() }
+                    .disabled(!browser.updates.isConfigured)
                 Button(L("Auf Seite suchen")) { browser.active?.showFind = true }.keyboardShortcut("f").disabled(browser.active?.url.isEmpty != false)
                 Button(L("Nächster Treffer")) { if let tab = browser.active { Task { await tab.find(tab.findQuery) } } }.keyboardShortcut("g")
                 Button(L("Vorheriger Treffer")) { if let tab = browser.active { Task { await tab.find(tab.findQuery, backwards: true) } } }.keyboardShortcut("g", modifiers: [.command, .shift])

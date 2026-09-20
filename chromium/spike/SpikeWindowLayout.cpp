@@ -49,27 +49,34 @@ SpikeWindow::SpikeWindow(
     userLayout->setContentsMargins(0, 0, 0, 0);
     userLayout->setSpacing(0);
 
-    back_ = new QPushButton(QStringLiteral("←"), userPane);
+    back_ = new QPushButton(userPane);
     back_->setObjectName(QStringLiteral("backButton"));
     back_->setToolTip(L(QStringLiteral("Zurück")));
-    forward_ = new QPushButton(QStringLiteral("→"), userPane);
+    installIcon(back_, QStringLiteral("chevron-left"), IconRole::normal);
+    forward_ = new QPushButton(userPane);
     forward_->setObjectName(QStringLiteral("forwardButton"));
     forward_->setToolTip(L(QStringLiteral("Vorwärts")));
-    reload_ = new QPushButton(QStringLiteral("↻"), userPane);
+    installIcon(forward_, QStringLiteral("chevron-right"), IconRole::normal);
+    reload_ = new QPushButton(userPane);
     reload_->setObjectName(QStringLiteral("reloadButton"));
     reload_->setToolTip(L(QStringLiteral("Neu laden")));
-    auto *libraryButton = new QPushButton(L(QStringLiteral("Bibliothek")), userPane);
+    installIcon(reload_, QStringLiteral("rotate-cw"), IconRole::normal);
+    auto *libraryButton = new QPushButton(userPane);
+    installIcon(libraryButton, QStringLiteral("history"), IconRole::muted);
     libraryButton->setObjectName(QStringLiteral("libraryButton"));
     libraryButton->setToolTip(L(QStringLiteral("Verlauf und Lesezeichen dieses Profils")));
+    QObject::connect(libraryButton, &QPushButton::clicked, this, [this] { showLibrary(); });
     address_ = new QLineEdit(userPane);
     address_->setObjectName(QStringLiteral("topAddress"));
     address_->setPlaceholderText(L(QStringLiteral("Suchen oder URL eingeben")));
     // Created before the toolbar layout so it is never added as a null widget.
-    loginFillButton_ = new QPushButton(QStringLiteral("⚿"), userPane);
+    loginFillButton_ = new QPushButton(userPane);
+    installIcon(loginFillButton_, QStringLiteral("key-round"), IconRole::muted);
     loginFillButton_->setObjectName(QStringLiteral("loginFillButton"));
     loginFillButton_->setToolTip(L(QStringLiteral("Gespeicherte Logins ausfüllen")));
     loginFillButton_->setAccessibleName(L(QStringLiteral("Gespeicherte Logins ausfüllen")));
-    appearanceButton_ = new QPushButton(QStringLiteral("◔"), userPane);
+    appearanceButton_ = new QPushButton(userPane);
+    installIcon(appearanceButton_, QStringLiteral("contrast"), IconRole::muted);
     appearanceButton_->setObjectName(QStringLiteral("appearanceButton"));
     appearanceButton_->setToolTip(L(QStringLiteral("Webseiten-Darstellung")));
     appearanceButton_->setAccessibleName(L(QStringLiteral("Webseiten-Darstellung")));
@@ -82,6 +89,30 @@ SpikeWindow::SpikeWindow(
     auto *sidebarLayout = new QVBoxLayout(workspaceSidebar);
     sidebarLayout->setContentsMargins(17, 12, 17, 12);
     sidebarLayout->setSpacing(8);
+    auto *sidebarNavigation = new QWidget(workspaceSidebar);
+    sidebarNavigation->setObjectName(QStringLiteral("topNavigation"));
+    auto *navigationLayout = new QHBoxLayout(sidebarNavigation);
+    navigationLayout->setContentsMargins(0, 0, 0, 0);
+    navigationLayout->setSpacing(2);
+#if defined(__APPLE__)
+    auto *trafficLightSpacer = new QWidget(sidebarNavigation);
+    trafficLightSpacer->setObjectName(QStringLiteral("trafficLightSpacer"));
+    trafficLightSpacer->setFixedWidth(68);
+    trafficLightSpacer->setFixedHeight(32);
+    navigationLayout->addWidget(trafficLightSpacer);
+#endif
+    navigationLayout->addWidget(back_);
+    navigationLayout->addWidget(forward_);
+    navigationLayout->addWidget(reload_);
+    sidebarToggle_ = new QPushButton(sidebarNavigation);
+    sidebarToggle_->setObjectName(QStringLiteral("sidebarToggleButton"));
+    sidebarToggle_->setToolTip(L(QStringLiteral("Seitenleiste ein-/ausklappen (⌘S)")));
+    installIcon(sidebarToggle_, QStringLiteral("panel-left"), IconRole::normal);
+    QObject::connect(sidebarToggle_, &QPushButton::clicked, this, [this] { toggleSidebar(); });
+    navigationLayout->addWidget(sidebarToggle_);
+    navigationLayout->addStretch();
+    sidebarLayout->addWidget(sidebarNavigation);
+
     auto *workspaceTitle = new QLabel(QStringLiteral("YoBro"), workspaceSidebar);
     workspaceTitle->setObjectName(QStringLiteral("productBrand"));
     auto *previewLabel = new QLabel(QStringLiteral("PREVIEW"), workspaceSidebar);
@@ -89,8 +120,8 @@ SpikeWindow::SpikeWindow(
     auto *brandRow = new QWidget(workspaceSidebar);
     brandRow->setObjectName(QStringLiteral("sidebarBrandRow"));
     auto *brandLayout = new QHBoxLayout(brandRow);
-    brandLayout->setContentsMargins(0, 3, 0, 14);
-    brandLayout->setSpacing(10);
+    brandLayout->setContentsMargins(0, 4, 0, 4);
+    brandLayout->setSpacing(8);
     auto *brandMark = new QLabel(QStringLiteral("Y"), brandRow);
     brandMark->setObjectName(QStringLiteral("productBrandMark"));
     brandLayout->addWidget(brandMark);
@@ -98,40 +129,81 @@ SpikeWindow::SpikeWindow(
     brandLayout->addStretch();
     brandLayout->addWidget(previewLabel, 0, Qt::AlignVCenter);
     sidebarLayout->addWidget(brandRow);
-    // The WebKit build keeps navigation and the address field inside the
-    // sidebar: the search field is the address editor, and the login and
-    // appearance buttons sit at its trailing edge like the key and shield do.
-    auto *sidebarNavigation = new QWidget(workspaceSidebar);
-    sidebarNavigation->setObjectName(QStringLiteral("topNavigation"));
-    auto *navigationLayout = new QHBoxLayout(sidebarNavigation);
-    navigationLayout->setContentsMargins(3, 0, 3, 0);
-    navigationLayout->setSpacing(2);
-    navigationLayout->addWidget(back_);
-    navigationLayout->addWidget(forward_);
-    navigationLayout->addWidget(reload_);
-    navigationLayout->addStretch();
-    sidebarLayout->insertWidget(0, sidebarNavigation);
+
     auto *searchRow = new QWidget(workspaceSidebar);
     searchRow->setObjectName(QStringLiteral("sidebarSearchRow"));
     auto *searchRowLayout = new QHBoxLayout(searchRow);
-    searchRowLayout->setContentsMargins(11, 0, 7, 0);
+    searchRowLayout->setContentsMargins(8, 0, 6, 0);
     searchRowLayout->setSpacing(4);
+    auto *lockButton = new QPushButton(searchRow);
+    lockButton->setObjectName(QStringLiteral("searchLockIcon"));
+    installIcon(lockButton, QStringLiteral("lock"), IconRole::muted);
+    lockButton->setFixedSize(16, 16);
+    // The lock describes the open page; it must not read as a dead button.
+    lockButton->setAttribute(Qt::WA_TransparentForMouseEvents);
+    lockButton->setCursor(Qt::ArrowCursor);
+    searchRowLayout->addWidget(lockButton);
     searchRowLayout->addWidget(address_, 1);
     searchRowLayout->addWidget(loginFillButton_);
     searchRowLayout->addWidget(appearanceButton_);
     sidebarLayout->addWidget(searchRow);
-    auto *workspaceSection = new QLabel(QStringLiteral("WORKSPACE"), workspaceSidebar);
-    workspaceSection->setText(L(QStringLiteral("DEINE TABS")));
-    workspaceSection->setObjectName(QStringLiteral("sidebarSectionLabel"));
-    sidebarLayout->addWidget(workspaceSection);
+
+    auto *sidebarMailButton = new QPushButton(workspaceSidebar);
+    sidebarMailButton->setObjectName(QStringLiteral("sidebarMailButton"));
+    installIcon(sidebarMailButton, QStringLiteral("mail"), IconRole::muted);
+    sidebarMailButton->setText(L(QStringLiteral("  E-Mail"), QStringLiteral("  Email")));
+    sidebarMailButton->setToolTip(L(QStringLiteral("Eingebautes Postfach (⇧⌘M)"), QStringLiteral("Built-in mailbox (⇧⌘M)")));
+    sidebarMailButton->setCursor(Qt::PointingHandCursor);
+    QObject::connect(sidebarMailButton, &QPushButton::clicked, this, [this] { showMail(); });
+    sidebarLayout->addWidget(sidebarMailButton);
+
+    auto *spaceStrip = new QWidget(workspaceSidebar);
+    spaceStrip->setObjectName(QStringLiteral("spaceStrip"));
+    auto *spaceStripLayout = new QHBoxLayout(spaceStrip);
+    spaceStripLayout->setContentsMargins(6, 0, 6, 0);
+    spaceStripLayout->setSpacing(2);
+    spaceStripButton_ = new QPushButton(spaceStrip);
+    spaceStripButton_->setObjectName(QStringLiteral("spaceStripButton"));
+    spaceStripButton_->setCursor(Qt::PointingHandCursor);
+    spaceStripButton_->setText(QStringLiteral("◇  ") + activeSpace_ + QStringLiteral("  ▼"));
+    QObject::connect(spaceStripButton_, &QPushButton::clicked, this, [this] {
+        QMenu menu(spaceStripButton_);
+        for (const QString &space : spaces_) {
+            auto *action = menu.addAction((space == activeSpace_ ? QStringLiteral("✓ ") : QStringLiteral("   ")) + spaceIcons_.value(space, QStringLiteral("◇")) + QStringLiteral(" ") + space);
+            connect(action, &QAction::triggered, this, [this, space] { switchSpace(space); });
+        }
+        menu.addSeparator();
+        auto *newSpaceAction = menu.addAction(L(QStringLiteral("Neuer Space...")));
+        connect(newSpaceAction, &QAction::triggered, this, [this] { createSpace(); });
+        menu.exec(spaceStripButton_->mapToGlobal(QPoint(0, spaceStripButton_->height())));
+    });
+    auto *spaceStripAddButton = new QPushButton(spaceStrip);
+    spaceStripAddButton->setObjectName(QStringLiteral("spaceStripAddButton"));
+    spaceStripAddButton->setText(QStringLiteral("+"));
+    spaceStripAddButton->setCursor(Qt::PointingHandCursor);
+    QObject::connect(spaceStripAddButton, &QPushButton::clicked, this, [this, spaceStripAddButton] {
+        QMenu menu(spaceStripAddButton);
+        auto *newSpaceAction = menu.addAction(L(QStringLiteral("Neuer Space...")));
+        connect(newSpaceAction, &QAction::triggered, this, [this] { createSpace(); });
+        auto *newFolderAction = menu.addAction(L(QStringLiteral("Neuer Ordner...")));
+        connect(newFolderAction, &QAction::triggered, this, [this] { createFolder(); });
+        auto *renameSpaceAction = menu.addAction(L(QStringLiteral("Space umbenennen...")));
+        connect(renameSpaceAction, &QAction::triggered, this, [this] { renameSpace(activeSpace_); });
+        auto *proxyAction = menu.addAction(L(QStringLiteral("Proxy-Einstellungen...")));
+        connect(proxyAction, &QAction::triggered, this, [this] { showSettings(); });
+        menu.exec(spaceStripAddButton->mapToGlobal(QPoint(0, spaceStripAddButton->height())));
+    });
+    spaceStripLayout->addWidget(spaceStripButton_, 1);
+    spaceStripLayout->addWidget(spaceStripAddButton);
+    sidebarLayout->addWidget(spaceStrip);
+
     workspaceTree_ = new QTreeWidget(workspaceSidebar);
     workspaceTree_->setObjectName(QStringLiteral("workspaceTree"));
     workspaceTree_->setHeaderHidden(true);
     workspaceTree_->setRootIsDecorated(true);
-    workspaceTree_->setIndentation(10);
+    workspaceTree_->setIndentation(12);
     workspaceTree_->setSelectionMode(QAbstractItemView::SingleSelection);
     workspaceTree_->setContextMenuPolicy(Qt::CustomContextMenu);
-    // Tabs are reordered and refiled by dragging them inside the sidebar.
     workspaceTree_->setDragEnabled(true);
     workspaceTree_->setAcceptDrops(true);
     workspaceTree_->viewport()->setAcceptDrops(true);
@@ -139,6 +211,107 @@ SpikeWindow::SpikeWindow(
     workspaceTree_->setDragDropMode(QAbstractItemView::InternalMove);
     workspaceTree_->setDefaultDropAction(Qt::MoveAction);
     sidebarLayout->addWidget(workspaceTree_, 1);
+
+    auto *sidebarTabActions = new QWidget(workspaceSidebar);
+    sidebarTabActions->setObjectName(QStringLiteral("sidebarTabActions"));
+    auto *tabActionsLayout = new QVBoxLayout(sidebarTabActions);
+    tabActionsLayout->setContentsMargins(0, 4, 0, 4);
+    tabActionsLayout->setSpacing(2);
+
+    auto *newTabButton = new QPushButton(sidebarTabActions);
+    newTabButton->setObjectName(QStringLiteral("sidebarNewTabButton"));
+    newTabButton->setText(L(QStringLiteral("+  Neuer Tab                     ⌘T"), QStringLiteral("+  New Tab                      ⌘T")));
+    newTabButton->setToolTip(L(QStringLiteral("Neuer Tab (⌘T)")));
+    newTabButton->setCursor(Qt::PointingHandCursor);
+    QObject::connect(newTabButton, &QPushButton::clicked, this, [this] { newUserTab(); });
+    tabActionsLayout->addWidget(newTabButton);
+
+    auto *newNoteButton = new QPushButton(sidebarTabActions);
+    newNoteButton->setObjectName(QStringLiteral("sidebarNewNoteButton"));
+    newNoteButton->setText(L(QStringLiteral("📝  Neue Notiz                   ⌘N"), QStringLiteral("📝  New Note                    ⌘N")));
+    newNoteButton->setToolTip(L(QStringLiteral("Neue Notiz (⌘N)")));
+    newNoteButton->setCursor(Qt::PointingHandCursor);
+    QObject::connect(newNoteButton, &QPushButton::clicked, this, [this] { (void)newNote(); });
+    tabActionsLayout->addWidget(newNoteButton);
+
+    auto *privateTabButton = new QPushButton(sidebarTabActions);
+    privateTabButton->setObjectName(QStringLiteral("sidebarPrivateTabButton"));
+    privateTabButton->setText(L(QStringLiteral("🕶  Privater Tab                ⇧⌘T"), QStringLiteral("🕶  Private Tab                 ⇧⌘T")));
+    privateTabButton->setToolTip(L(QStringLiteral("Privater Tab (⇧⌘T)")));
+    privateTabButton->setCursor(Qt::PointingHandCursor);
+    QObject::connect(privateTabButton, &QPushButton::clicked, this, [this] { newUserTab({}, true); });
+    tabActionsLayout->addWidget(privateTabButton);
+
+    sidebarLayout->addWidget(sidebarTabActions);
+
+    auto *sidebarLibraryBar = new QWidget(workspaceSidebar);
+    sidebarLibraryBar->setObjectName(QStringLiteral("sidebarLibraryBar"));
+    auto *libraryBarLayout = new QHBoxLayout(sidebarLibraryBar);
+    libraryBarLayout->setContentsMargins(4, 2, 4, 2);
+    libraryBarLayout->setSpacing(2);
+
+    auto *libHistoryBtn = new QPushButton(sidebarLibraryBar);
+    installIcon(libHistoryBtn, QStringLiteral("history"), IconRole::muted);
+    libHistoryBtn->setToolTip(L(QStringLiteral("Verlauf (⌘Y)")));
+    libHistoryBtn->setCursor(Qt::PointingHandCursor);
+    QObject::connect(libHistoryBtn, &QPushButton::clicked, this, [this] { showLibrary(LibrarySection::history); });
+    libraryBarLayout->addWidget(libHistoryBtn);
+
+    auto *libBookmarksBtn = new QPushButton(sidebarLibraryBar);
+    installIcon(libBookmarksBtn, QStringLiteral("bookmark"), IconRole::muted);
+    libBookmarksBtn->setToolTip(L(QStringLiteral("Lesezeichen (⌥⌘B)")));
+    libBookmarksBtn->setCursor(Qt::PointingHandCursor);
+    QObject::connect(libBookmarksBtn, &QPushButton::clicked, this, [this] { showLibrary(LibrarySection::bookmarks); });
+    libraryBarLayout->addWidget(libBookmarksBtn);
+
+    auto *libDownloadsBtn = new QPushButton(sidebarLibraryBar);
+    libDownloadsBtn->setObjectName(QStringLiteral("downloadsButton"));
+    installIcon(libDownloadsBtn, QStringLiteral("download"), IconRole::muted);
+    libDownloadsBtn->setToolTip(L(QStringLiteral("Deine Bibliothek · Downloads (⇧⌘J)")));
+    libDownloadsBtn->setCursor(Qt::PointingHandCursor);
+    QObject::connect(libDownloadsBtn, &QPushButton::clicked, this, [this] { showDownloads(); });
+    libraryBarLayout->addWidget(libDownloadsBtn);
+
+    sidebarLayout->addWidget(sidebarLibraryBar);
+
+    auto *agentCard = new QWidget(workspaceSidebar);
+    agentCard->setObjectName(QStringLiteral("sidebarAgentCard"));
+    auto *agentCardLayout = new QVBoxLayout(agentCard);
+    agentCardLayout->setContentsMargins(6, 4, 6, 4);
+    agentCardLayout->setSpacing(2);
+
+    agentPaneToggle_ = new QPushButton(agentCard);
+    agentPaneToggle_->setObjectName(QStringLiteral("agentPaneToggle"));
+    agentPaneToggle_->setCheckable(true);
+    agentPaneToggle_->setText(QStringLiteral("●  Bereit für deine Agenten           ↗\nEin Browser. Für euch beide."));
+    agentPaneToggle_->setCursor(Qt::PointingHandCursor);
+    agentPaneToggle_->setToolTip(L(QStringLiteral("Isolierte Agentenfläche ein- oder ausblenden")));
+    QObject::connect(agentPaneToggle_, &QPushButton::clicked, this, [this] {
+        setAgentPaneVisible(agentPaneToggle_->isChecked());
+    });
+    agentCardLayout->addWidget(agentPaneToggle_);
+    sidebarLayout->addWidget(agentCard);
+
+    profileFooter_ = new QPushButton(workspaceSidebar);
+    profileFooter_->setObjectName(QStringLiteral("sidebarProfileFooter"));
+    profileFooter_->setToolTip(L(QStringLiteral("Profile und Einstellungen (⌘,)")));
+    profileFooter_->setCursor(Qt::PointingHandCursor);
+    QObject::connect(profileFooter_, &QPushButton::clicked, this, [this] { showSettings(); });
+    sidebarLayout->addWidget(profileFooter_);
+    updateProfileFooter();
+
+    spacePicker_ = new QComboBox(workspaceSidebar);
+    // Hidden plumbing, but tests and helpers still look the names up.
+    spacePicker_->setObjectName(QStringLiteral("spacePicker"));
+    spacePicker_->hide();
+    folderPicker_ = new QComboBox(workspaceSidebar);
+    folderPicker_->setObjectName(QStringLiteral("folderPicker"));
+    folderPicker_->hide();
+    reopenClosedTabButton_ = new QPushButton(workspaceSidebar);
+    reopenClosedTabButton_->setObjectName(QStringLiteral("reopenClosedTabButton"));
+    reopenClosedTabButton_->hide();
+    QObject::connect(reopenClosedTabButton_, &QPushButton::clicked, this, [this] { reopenClosedTab(); });
+
     userLayout->addWidget(workspaceSidebar);
 
     auto *browserContentHost = new QWidget(userPane);
@@ -146,131 +319,6 @@ SpikeWindow::SpikeWindow(
     auto *browserLayout = new QVBoxLayout(browserContentHost);
     browserLayout->setContentsMargins(10, 10, 10, 10);
     browserLayout->setSpacing(10);
-    // No top chrome: the WebKit build has no toolbar row above the content —
-    // navigation and the address editor live in the sidebar.
-
-    auto *newNoteButton = new QPushButton(L(QStringLiteral("Neue Notiz"), QStringLiteral("New note")), userPane);
-    newNoteButton->setObjectName(QStringLiteral("newNoteButton"));
-    QObject::connect(newNoteButton, &QPushButton::clicked, this, [this] { (void)newNote(); });
-    auto *newTabButton = new QPushButton(L(QStringLiteral("Neuer Tab")), userPane);
-    newTabButton->setObjectName(QStringLiteral("newTabButton"));
-    auto *privateTabButton = new QPushButton(L(QStringLiteral("Privat")), userPane);
-    privateTabButton->setObjectName(QStringLiteral("privateTabButton"));
-    auto *bookmarkButton = new QPushButton(QStringLiteral("★"), userPane);
-    bookmarkButton->setObjectName(QStringLiteral("bookmarkCurrentPageButton"));
-    bookmarkButton->setToolTip(L(QStringLiteral("Aktuelle Seite als Lesezeichen speichern")));
-    reopenClosedTabButton_ = new QPushButton(L(QStringLiteral("Tab wieder öffnen")), userPane);
-    reopenClosedTabButton_->setObjectName(QStringLiteral("reopenClosedTabButton"));
-    // The WebKit build offers this as a menu command without a key, so ⇧⌘T can
-    // stay on the private tab.
-    reopenClosedTabButton_->setToolTip(L(QStringLiteral("Zuletzt geschlossenen Tab wieder öffnen")));
-    reopenClosedTabButton_->setEnabled(false);
-    auto *downloadsButton = new QPushButton(QStringLiteral("Downloads"), userPane);
-    auto *importButton = new QPushButton(L(QStringLiteral("Daten importieren")), userPane);
-    importButton->setObjectName(QStringLiteral("webkitImportButton"));
-    importButton->setToolTip(L(QStringLiteral("Lesezeichen, Verlauf und Tabs aus einem YOBRO-WebKit-Profil importieren")));
-    auto *extensionsButton = new QPushButton(L(QStringLiteral("Erweiterungen")), userPane);
-    extensionsButton->setObjectName(QStringLiteral("extensionsButton"));
-    auto *mailButton = new QPushButton(QStringLiteral("YoBro Mail"), userPane);
-    mailButton->setObjectName(QStringLiteral("mailButton"));
-    // ⇧⌘M belongs to the menu action, as with Downloads.
-    mailButton->setToolTip(L(QStringLiteral("Eingebautes Postfach (⇧⌘M)"),
-                             QStringLiteral("Built-in mailbox (⇧⌘M)")));
-    auto *agentPaneToggle = new QPushButton(L(QStringLiteral("Agent anzeigen"), QStringLiteral("Show agent")), userPane);
-    agentPaneToggle->setObjectName(QStringLiteral("agentPaneToggle"));
-    agentPaneToggle->setCheckable(true);
-    agentPaneToggle->setToolTip(L(QStringLiteral("Isolierte Agentenfläche ein- oder ausblenden")));
-    downloadsButton->setObjectName(QStringLiteral("downloadsButton"));
-    // ⇧⌘J belongs to the menu action; a second binding would be ambiguous.
-    downloadsButton->setToolTip(L(QStringLiteral("Deine Bibliothek · Downloads (⇧⌘J)")));
-    spacePicker_ = new QComboBox(workspaceSidebar);
-    spacePicker_->setObjectName(QStringLiteral("spacePicker"));
-    spacePicker_->setToolTip(L(QStringLiteral("Aktiven Space wechseln")));
-    spacePicker_->addItem(activeSpace_);
-    auto *addSpaceButton = new QPushButton(QStringLiteral("+"), workspaceSidebar);
-    addSpaceButton->setObjectName(QStringLiteral("addSpaceButton"));
-    addSpaceButton->setToolTip(L(QStringLiteral("Neuen Space erstellen")));
-    folderPicker_ = new QComboBox(workspaceSidebar);
-    folderPicker_->setObjectName(QStringLiteral("folderPicker"));
-    folderPicker_->addItem(L(QStringLiteral("Ohne Ordner")), QString());
-    auto *addFolderButton = new QPushButton(QStringLiteral("+"), workspaceSidebar);
-    addFolderButton->setObjectName(QStringLiteral("addFolderButton"));
-    addFolderButton->setToolTip(L(QStringLiteral("Neuen Ordner erstellen")));
-    auto *moveFolderButton = new QPushButton(L(QStringLiteral("Ordner")), workspaceSidebar);
-    moveFolderButton->setObjectName(QStringLiteral("moveToFolderButton"));
-    auto *togglePinnedButton = new QPushButton(L(QStringLiteral("Pin")), workspaceSidebar);
-    togglePinnedButton->setObjectName(QStringLiteral("togglePinnedButton"));
-    togglePinnedButton->setToolTip(L(QStringLiteral("Aktuellen Tab in der Sidebar an- oder lospinnen")));
-    auto *tabActions = new QWidget(workspaceSidebar);
-    tabActions->setObjectName(QStringLiteral("sidebarTabActions"));
-    auto *tabActionsLayout = new QHBoxLayout(tabActions);
-    tabActionsLayout->setContentsMargins(0, 0, 0, 0);
-    tabActionsLayout->setSpacing(4);
-    tabActionsLayout->addWidget(newTabButton);
-    tabActionsLayout->addWidget(newNoteButton);
-    tabActionsLayout->addWidget(privateTabButton);
-    tabActionsLayout->addWidget(reopenClosedTabButton_);
-    sidebarLayout->addWidget(tabActions);
-
-    auto *spaceActions = new QWidget(workspaceSidebar);
-    spaceActions->setObjectName(QStringLiteral("sidebarSpaceActions"));
-    auto *spaceActionsLayout = new QHBoxLayout(spaceActions);
-    spaceActionsLayout->setContentsMargins(0, 0, 0, 0);
-    spaceActionsLayout->setSpacing(4);
-    spaceActionsLayout->addWidget(spacePicker_, 1);
-    spaceActionsLayout->addWidget(addSpaceButton);
-    sidebarLayout->addWidget(spaceActions);
-
-    auto *folderActions = new QWidget(workspaceSidebar);
-    folderActions->setObjectName(QStringLiteral("sidebarFolderActions"));
-    auto *folderActionsLayout = new QHBoxLayout(folderActions);
-    folderActionsLayout->setContentsMargins(0, 0, 0, 0);
-    folderActionsLayout->setSpacing(4);
-    folderActionsLayout->addWidget(folderPicker_, 1);
-    folderActionsLayout->addWidget(addFolderButton);
-    sidebarLayout->addWidget(folderActions);
-    // WebKit order: space pill and folder row sit between the search field and
-    // the "YOUR TABS" label.
-    sidebarLayout->insertWidget(3, spaceActions);
-    sidebarLayout->insertWidget(4, folderActions);
-
-    auto *pageActions = new QWidget(workspaceSidebar);
-    pageActions->setObjectName(QStringLiteral("sidebarPageActions"));
-    auto *pageActionsLayout = new QHBoxLayout(pageActions);
-    pageActionsLayout->setContentsMargins(0, 0, 0, 0);
-    pageActionsLayout->setSpacing(2);
-    pageActionsLayout->addWidget(bookmarkButton);
-    pageActionsLayout->addWidget(moveFolderButton);
-    pageActionsLayout->addWidget(togglePinnedButton);
-    pageActionsLayout->addWidget(importButton);
-    pageActionsLayout->addWidget(extensionsButton);
-    sidebarLayout->addWidget(pageActions);
-
-    auto *libraryActions = new QWidget(workspaceSidebar);
-    libraryActions->setObjectName(QStringLiteral("sidebarLibraryActions"));
-    auto *libraryActionsLayout = new QHBoxLayout(libraryActions);
-    libraryActionsLayout->setContentsMargins(0, 0, 0, 0);
-    libraryActionsLayout->setSpacing(4);
-    libraryActionsLayout->addWidget(libraryButton, 1);
-    libraryActionsLayout->addWidget(downloadsButton, 1);
-    libraryActionsLayout->addWidget(mailButton, 1);
-    sidebarLayout->addWidget(libraryActions);
-
-    auto *agentCard = new QWidget(workspaceSidebar);
-    agentCard->setObjectName(QStringLiteral("sidebarAgentCard"));
-    auto *agentCardLayout = new QVBoxLayout(agentCard);
-    agentCardLayout->setContentsMargins(13, 12, 13, 12);
-    agentCardLayout->setSpacing(4);
-    agentPaneToggle->setText(QStringLiteral("●  Bereit für deine Agenten\nEin Browser. Für euch beide."));
-    agentPaneToggle->setObjectName(QStringLiteral("agentPaneToggle"));
-    agentPaneToggle->setMinimumHeight(58);
-    agentCardLayout->addWidget(agentPaneToggle);
-    sidebarLayout->addWidget(agentCard);
-    profileFooter_ = new QPushButton(workspaceSidebar);
-    profileFooter_->setObjectName(QStringLiteral("sidebarProfileFooter"));
-    profileFooter_->setToolTip(L(QStringLiteral("Profile und Einstellungen (⌘,)")));
-    sidebarLayout->addWidget(profileFooter_);
-    QObject::connect(profileFooter_, &QPushButton::clicked, this, [this] { showSettings(); });
 
     // The collapsed sidebar keeps spaces and tabs reachable as icons instead of
     // hiding the workspace entirely.
@@ -309,13 +357,16 @@ SpikeWindow::SpikeWindow(
     findInput_->setPlaceholderText(L(QStringLiteral("Auf dieser Seite suchen")));
     findStatus_ = new QLabel(QString(), findBar_);
     findStatus_->setObjectName(QStringLiteral("findStatus"));
-    auto *findPrevious = new QPushButton(QStringLiteral("‹"), findBar_);
+    auto *findPrevious = new QPushButton(findBar_);
     findPrevious->setObjectName(QStringLiteral("findPreviousButton"));
     findPrevious->setToolTip(L(QStringLiteral("Vorherige Übereinstimmung (⇧⌘G)")));
-    auto *findNext = new QPushButton(QStringLiteral("›"), findBar_);
+    auto *findNext = new QPushButton(findBar_);
     findNext->setObjectName(QStringLiteral("findNextButton"));
     findNext->setToolTip(L(QStringLiteral("Nächste Übereinstimmung (⌘G)")));
-    auto *findClose = new QPushButton(QStringLiteral("×"), findBar_);
+    auto *findClose = new QPushButton(findBar_);
+    installIcon(findPrevious, QStringLiteral("chevron-up"), IconRole::muted);
+    installIcon(findNext, QStringLiteral("chevron-down"), IconRole::muted);
+    installIcon(findClose, QStringLiteral("x"), IconRole::muted);
     findClose->setObjectName(QStringLiteral("findCloseButton"));
     findLayout->addWidget(findInput_, 1);
     findLayout->addWidget(findStatus_);
@@ -330,6 +381,21 @@ SpikeWindow::SpikeWindow(
     status_->hide();
     browserLayout->addWidget(status_);
     userLayout->addWidget(browserContentHost, 1);
+
+    // ADD RIGHT EDGE AGENT TAB TO MATCH WEBKIT
+    agentQuickAccess_ = new QPushButton(QStringLiteral("A\nG\nE\nN\nT"), userPane);
+    agentQuickAccess_->setObjectName(QStringLiteral("agentQuickAccess"));
+    agentQuickAccess_->setFixedWidth(18);
+    agentQuickAccess_->setMinimumHeight(96);
+    agentQuickAccess_->setCursor(Qt::PointingHandCursor);
+    agentQuickAccess_->setCheckable(true);
+    userLayout->addWidget(agentQuickAccess_, 0, Qt::AlignVCenter);
+    QObject::connect(agentQuickAccess_, &QPushButton::clicked, this, [this] {
+        if (auto *toggle = findChild<QPushButton *>(QStringLiteral("agentPaneToggle"))) {
+            toggle->click();
+        }
+    });
+
 
     auto *agentPane = new QWidget(splitter);
     agentPane_ = agentPane;
@@ -368,9 +434,13 @@ SpikeWindow::SpikeWindow(
 
     chatRunner_ = new SpaceChatRunner(chat_, this);
     chatPanel_ = new SpaceChatPanel(chat_, *chatRunner_, *this, agentPane);
+    QObject::connect(chatPanel_, &SpaceChatPanel::closeRequested, this, [this] {
+        setAgentPaneVisible(false);
+    });
     agentLayout->addWidget(chatPanel_, 3);
 
     auto *agentWebHost = new QWidget(agentPane);
+    agentWebHost->setObjectName(QStringLiteral("agentWebHost"));
     agentWebLayout_ = new QVBoxLayout(agentWebHost);
     agentWebLayout_->setContentsMargins(0, 0, 0, 0);
     agentPlaceholder_ = new QLabel(QStringLiteral(
@@ -409,15 +479,6 @@ SpikeWindow::SpikeWindow(
     setCentralWidget(root);
     applyTheme();
 
-    QObject::connect(newTabButton, &QPushButton::clicked, this, [this] { newUserTab(); });
-    QObject::connect(privateTabButton, &QPushButton::clicked, this, [this] { newUserTab({}, true); });
-    QObject::connect(libraryButton, &QPushButton::clicked, this, [this] { showLibrary(); });
-    QObject::connect(bookmarkButton, &QPushButton::clicked, this, [this] { bookmarkCurrentPage(); });
-    QObject::connect(reopenClosedTabButton_, &QPushButton::clicked, this, [this] { reopenClosedTab(); });
-    QObject::connect(addSpaceButton, &QPushButton::clicked, this, [this] { createSpace(); });
-    QObject::connect(addFolderButton, &QPushButton::clicked, this, [this] { createFolder(); });
-    QObject::connect(moveFolderButton, &QPushButton::clicked, this, [this] { moveCurrentTabToFolder(); });
-    QObject::connect(togglePinnedButton, &QPushButton::clicked, this, [this] { toggleCurrentTabPinned(); });
     QObject::connect(workspaceTree_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) {
         activateWorkspaceItem(item);
     });
@@ -442,16 +503,6 @@ SpikeWindow::SpikeWindow(
         scheduleWorkspaceOrderCommit();
     });
     QObject::connect(spacePicker_, &QComboBox::textActivated, this, [this](const QString &value) { switchSpace(value); });
-    QObject::connect(downloadsButton, &QPushButton::clicked, this, [this] { showDownloads(); });
-    QObject::connect(mailButton, &QPushButton::clicked, this, [this] { showMail(); });
-    QObject::connect(importButton, &QPushButton::clicked, this, [this] { showWebKitImport(); });
-    QObject::connect(extensionsButton, &QPushButton::clicked, this, [this] { showExtensions(); });
-    QObject::connect(agentPaneToggle, &QPushButton::toggled, this, [this, agentPaneToggle](bool visible) {
-        setAgentPaneVisible(visible);
-        agentPaneToggle->setText(visible
-            ? QStringLiteral("●  Agentenfläche offen\nDu links · Agent rechts")
-            : QStringLiteral("●  Bereit für deine Agenten\nEin Browser. Für euch beide."));
-    });
     QObject::connect(address_, &QLineEdit::returnPressed, this, [this] { navigateCurrent(); });
     QObject::connect(findInput_, &QLineEdit::returnPressed, this, [this] { findInPage(false); });
     QObject::connect(findInput_, &QLineEdit::textChanged, this, [this](const QString &value) {
@@ -929,34 +980,43 @@ void SpikeWindow::buildCompactSidebar(QWidget *parent) {
     layout->setContentsMargins(9, 12, 9, 12);
     layout->setSpacing(6);
 
+#if defined(__APPLE__)
+    auto *compactTrafficSpacer = new QWidget(compactSidebar_);
+    compactTrafficSpacer->setObjectName(QStringLiteral("compactTrafficSpacer"));
+    compactTrafficSpacer->setFixedHeight(32);
+    layout->addWidget(compactTrafficSpacer);
+#endif
+
     const auto iconButton = [this](
-        const QString &glyph,
+        const QString &iconName,
         const QString &tooltip,
         const QString &objectName,
-        std::function<void()> handler
+        std::function<void()> handler,
+        IconRole role = IconRole::muted
     ) {
-        auto *button = new QPushButton(glyph, compactSidebar_);
+        auto *button = new QPushButton(compactSidebar_);
         button->setObjectName(objectName);
         button->setToolTip(tooltip);
         button->setAccessibleName(tooltip);
+        installIcon(button, iconName, role);
         QObject::connect(button, &QPushButton::clicked, this, std::move(handler));
         return button;
     };
 
-    layout->addWidget(iconButton(QStringLiteral("❯"), L(QStringLiteral("Seitenleiste einblenden · ⌘S")),
+    layout->addWidget(iconButton(QStringLiteral("chevron-right"), L(QStringLiteral("Seitenleiste einblenden · ⌘S")),
         QStringLiteral("compactExpandButton"), [this] { setSidebarCompact(false); }));
-    layout->addWidget(iconButton(QStringLiteral("⌕"), L(QStringLiteral("Adresse öffnen · ⌘L")),
+    layout->addWidget(iconButton(QStringLiteral("search"), L(QStringLiteral("Adresse öffnen · ⌘L")),
         QStringLiteral("compactAddressButton"), [this] {
             address_->setFocus(Qt::ShortcutFocusReason);
             address_->selectAll();
         }));
-    layout->addWidget(iconButton(QStringLiteral("◫"), L(QStringLiteral("Agentenpanel · ⇧⌘A")),
+    layout->addWidget(iconButton(QStringLiteral("sparkles"), L(QStringLiteral("Agentenpanel · ⇧⌘A")),
         QStringLiteral("compactAgentButton"), [this] {
             if (auto *toggle = findChild<QPushButton *>(QStringLiteral("agentPaneToggle")))
                 toggle->setChecked(!toggle->isChecked());
-        }));
+        }, IconRole::brand));
 
-    auto *spaceButton = iconButton(QStringLiteral("◈"), L(QStringLiteral("Space wechseln")),
+    auto *spaceButton = iconButton(QStringLiteral("columns-2"), L(QStringLiteral("Space wechseln")),
         QStringLiteral("compactSpaceButton"), [this] {
             QMenu menu(compactSidebar_);
             for (const QString &space : spaces_) {
@@ -981,7 +1041,7 @@ void SpikeWindow::buildCompactSidebar(QWidget *parent) {
     });
     layout->addWidget(compactTabs_, 1);
 
-    auto *newTab = iconButton(QStringLiteral("+"), L(QStringLiteral("Neuer Tab · ⌘T")),
+    auto *newTab = iconButton(QStringLiteral("plus"), L(QStringLiteral("Neuer Tab · ⌘T")),
         QStringLiteral("compactNewTabButton"), [this] { newUserTab(); });
     newTab->setContextMenuPolicy(Qt::CustomContextMenu);
     QObject::connect(newTab, &QPushButton::customContextMenuRequested, this, [this, newTab](const QPoint &at) {
@@ -992,11 +1052,11 @@ void SpikeWindow::buildCompactSidebar(QWidget *parent) {
     });
     layout->addWidget(newTab);
 
-    layout->addWidget(iconButton(QStringLiteral("◷"), L(QStringLiteral("Verlauf · ⌘Y")),
+    layout->addWidget(iconButton(QStringLiteral("history"), L(QStringLiteral("Verlauf · ⌘Y")),
         QStringLiteral("compactHistoryButton"), [this] { showLibrary(LibrarySection::history); }));
-    layout->addWidget(iconButton(QStringLiteral("⇩"), L(QStringLiteral("Downloads · ⇧⌘J")),
+    layout->addWidget(iconButton(QStringLiteral("download"), L(QStringLiteral("Downloads · ⇧⌘J")),
         QStringLiteral("compactDownloadsButton"), [this] { showDownloads(); }));
-    layout->addWidget(iconButton(QStringLiteral("●"), L(QStringLiteral("Profile und Einstellungen · ⌘,")),
+    layout->addWidget(iconButton(QStringLiteral("settings"), L(QStringLiteral("Profile und Einstellungen · ⌘,")),
         QStringLiteral("compactProfileButton"), [this] { showSettings(); }));
 }
 

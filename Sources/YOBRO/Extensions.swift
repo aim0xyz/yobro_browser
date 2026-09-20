@@ -24,6 +24,7 @@ final class ExtensionStore: ObservableObject {
     let directory: URL
     private var runtimeObject: AnyObject?
     private var candidateObject: AnyObject?
+    var bundledBlockerInstalling = false
     var supported: Bool { if #available(macOS 15.4, *) { return true }; return false }
     @available(macOS 15.4, *) var runtime: ExtensionRuntime { runtimeObject as! ExtensionRuntime }
 
@@ -42,8 +43,11 @@ final class ExtensionStore: ObservableObject {
         guard #available(macOS 15.4, *) else { return }
         runtime.owner = owner
         runtime.controller.didOpenWindow(runtime)
+        if ProcessInfo.processInfo.environment["YOBRO_HOME"] == nil { await installBundledBlockerIfNeeded() }
         for entry in entries where entry.enabled {
-            do { try await runtime.load(entry, from: directory.appendingPathComponent(entry.file)) }
+            do {
+                if runtime.contexts[entry.id] == nil { try await runtime.load(entry, from: directory.appendingPathComponent(entry.file)) }
+            }
             catch { errors[entry.id] = error.localizedDescription }
         }
     }
@@ -88,7 +92,7 @@ final class ExtensionStore: ObservableObject {
             guard ext.supportsManifestVersion(ext.manifestVersion) else { throw YOBROError.message(L("Diese Manifest-Version wird von WebKit nicht unterstützt.")) }
             let required = ext.manifest["permissions"] as? [String] ?? []
             if required.contains("proxy") {
-                throw YOBROError.message(L("Diese Erweiterung benötigt die Chrome-Proxy-API (proxy). YoBro unterstützt diese API noch nicht; VPN-Verbindungen dieser Erweiterung funktionieren deshalb nicht. Das betrifft auch NordVPN. Für den VPN-Schutz kann die separate macOS-App des Anbieters verwendet werden."))
+                throw YOBROError.message(L("Diese Erweiterung benötigt die Chrome-Proxy-API (proxy). YoBro unterstützt diese API noch nicht; die Proxy-Funktionen dieser Erweiterung funktionieren deshalb nicht.", "This extension requires the Chrome proxy API, which YoBro does not support; its proxy features will not work here."))
             }
             pendingWarnings = ext.errors.map(\.localizedDescription)
             let implemented = Set(ext.requestedPermissions.map(\.rawValue))
@@ -148,11 +152,13 @@ final class ExtensionStore: ObservableObject {
     }
     func remove(_ entry: InstalledExtension) {
         guard #available(macOS 15.4, *) else { return }
+        guard !busy else { return }
         do {
-            try runtime.unload(entry.id)
             let previous = entries
             entries.removeAll { $0.id == entry.id }
             do { try save() } catch { entries = previous; throw error }
+            do { try runtime.unload(entry.id) }
+            catch { entries = previous; try? save(); throw error }
             try FileManager.default.removeItem(at: directory.appendingPathComponent(entry.file))
             errors[entry.id] = nil
         } catch { message = error.localizedDescription }
@@ -190,12 +196,10 @@ final class ExtensionRuntime: NSObject, WKWebExtensionControllerDelegate, WKWebE
     let controller: WKWebExtensionController
     weak var owner: BrowserModel?
     var contexts: [UUID: WKWebExtensionContext] = [:]
+    var blockerReadinessSummary: [String: Any] = [:]
     private var backgroundLoadTasks: [UUID: Task<Void, Never>] = [:]
     private var popupWindows: [NSWindow] = []
-    private var actionPopover: NSPopover?
-    private var actionPopoverEventMonitor: Any?
-    private var actionPopoverCloseObserver: NSObjectProtocol?
-    private var applicationResignObserver: NSObjectProtocol?
+    private var actionPanel: ExtensionActionPanel?
     init(websiteDataStore: WKWebsiteDataStore? = nil, profileIdentifier: UUID? = nil) {
         let configuration: WKWebExtensionController.Configuration
         if let websiteDataStore, !websiteDataStore.isPersistent { configuration = .nonPersistent() }
@@ -212,7 +216,11 @@ final class ExtensionRuntime: NSObject, WKWebExtensionControllerDelegate, WKWebE
     }
     func load(_ entry: InstalledExtension, from url: URL) async throws { try await load(entry, extension: WKWebExtension(resourceBaseURL: url)) }
     func load(_ entry: InstalledExtension, extension ext: WKWebExtension) async throws {
+        guard contexts[entry.id] == nil else { return }
         let context = WKWebExtensionContext(for: ext)
+        // An ephemeral runtime needs access to its own nonpersistent extension
+        // pages. Regular private browser tabs do not attach this controller.
+        context.hasAccessToPrivateData = !controller.configuration.defaultWebsiteDataStore.isPersistent
         context.uniqueIdentifier = entry.id.uuidString
         context.baseURL = URL(string: "webkit-extension://\(entry.id.uuidString.lowercased())/")!
         context.unsupportedAPIs = ["bookmarks", "history", "downloads", "runtime.connectNative", "runtime.sendNativeMessage", "sessions", "topSites"]
@@ -240,14 +248,20 @@ final class ExtensionRuntime: NSObject, WKWebExtensionControllerDelegate, WKWebE
                     }
                 }
             } else {
-                try await context.loadBackgroundContent()
+                do { try await context.loadBackgroundContent() }
+                catch { try? unload(entry.id); throw error }
             }
+        }
+        if #available(macOS 15.6, *), entry.id == ExtensionStore.bundledBlockerID {
+            do { try await waitForBundledBlocker(context) }
+            catch { try? unload(entry.id); throw error }
         }
     }
     func unload(_ id: UUID) throws {
         backgroundLoadTasks[id]?.cancel()
         backgroundLoadTasks[id] = nil
         if let context = contexts[id] { try controller.unload(context); contexts[id] = nil }
+        if id == ExtensionStore.bundledBlockerID { blockerReadinessSummary = [:] }
     }
     func tabs(for context: WKWebExtensionContext) -> [any WKWebExtensionTab] { owner?.tabs ?? [] }
     func activeTab(for context: WKWebExtensionContext) -> (any WKWebExtensionTab)? { owner?.active }
@@ -273,54 +287,20 @@ final class ExtensionRuntime: NSObject, WKWebExtensionControllerDelegate, WKWebE
         completionHandler(tab, nil)
     }
     func webExtensionController(_ controller: WKWebExtensionController, presentActionPopup action: WKWebExtension.Action, for context: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        guard let popover = action.popupPopover, let view = owner?.active?.webView, view.window != nil else { completionHandler(YOBROError.message(L("Bitte zuerst einen Browser-Tab öffnen."))); return }
-        dismissActionPopover()
-        // A transient NSPopover is dismissed when SwiftUI presents the folder
-        // preview popover on hover. Keep the extension popup under our control
-        // so pointer-only previews do not count as an outside interaction.
-        popover.behavior = .applicationDefined
-        popover.show(relativeTo: NSRect(x: max(0, view.bounds.width - 44), y: view.bounds.height - 1, width: 1, height: 1), of: view, preferredEdge: .minY)
-        trackActionPopover(popover)
-        completionHandler(nil)
-    }
-    private func trackActionPopover(_ popover: NSPopover) {
-        actionPopover = popover
+        guard let view = owner?.active?.webView, let panel = ExtensionActionPanel(action: action, anchor: view) else {
+            completionHandler(YOBROError.message(L("Bitte zuerst einen Browser-Tab öffnen.")))
+            return
+        }
+        actionPanel?.dismiss()
+        actionPanel = panel
         owner?.extensionActionPopupPresented = true
-        actionPopoverCloseObserver = NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self, weak popover] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.actionPopover === popover else { return }
-                self.clearActionPopoverTracking()
-            }
+        panel.onDismiss = { [weak self, weak panel] in
+            guard let self, self.actionPanel === panel else { return }
+            self.actionPanel = nil
+            self.owner?.extensionActionPopupPresented = false
         }
-        applicationResignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.dismissActionPopover() }
-        }
-        actionPopoverEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self, weak popover] event in
-            guard let self else { return event }
-            if event.type == .keyDown && event.keyCode == 53 {
-                self.dismissActionPopover()
-                return nil
-            }
-            if event.type != .keyDown, event.window !== popover?.contentViewController?.view.window {
-                self.dismissActionPopover()
-            }
-            return event
-        }
-    }
-    private func dismissActionPopover() {
-        let popover = actionPopover
-        clearActionPopoverTracking()
-        popover?.close()
-    }
-    private func clearActionPopoverTracking() {
-        if let actionPopoverEventMonitor { NSEvent.removeMonitor(actionPopoverEventMonitor) }
-        if let actionPopoverCloseObserver { NotificationCenter.default.removeObserver(actionPopoverCloseObserver) }
-        if let applicationResignObserver { NotificationCenter.default.removeObserver(applicationResignObserver) }
-        actionPopoverEventMonitor = nil
-        actionPopoverCloseObserver = nil
-        applicationResignObserver = nil
-        actionPopover = nil
-        owner?.extensionActionPopupPresented = false
+        panel.show()
+        completionHandler(nil)
     }
     func webExtensionController(_ controller: WKWebExtensionController, openOptionsPageFor context: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
         guard let url = context.optionsPageURL, let config = context.webViewConfiguration else { completionHandler(YOBROError.message(L("Keine Einstellungsseite verfügbar."))); return }

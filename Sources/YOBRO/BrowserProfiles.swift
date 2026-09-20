@@ -143,7 +143,7 @@ struct ProfileMenu: View {
             }
         }
         .onHover { hovering = $0 }
-        .help(L("Profil: ", "Profile: ") + profiles.active.name + "\n" + L("Profil wechseln und Einstellungen öffnen", "Switch profiles and open settings"))
+        .yobroHelp(L("Profil: ", "Profile: ") + profiles.active.name + "\n" + L("Profil wechseln und Einstellungen öffnen", "Switch profiles and open settings"))
     }
 
     @ViewBuilder

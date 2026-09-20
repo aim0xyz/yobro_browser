@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import AppKit
+import CoreImage.CIFilterBuiltins
 
 struct BrowserSettings: View {
     @ObservedObject var model: BrowserModel
@@ -8,6 +9,7 @@ struct BrowserSettings: View {
     private var sections: [(String, String)] { [
         (L("Allgemein", "General"), "gearshape"),
         (L("Sync", "Sync"), "arrow.triangle.2.circlepath"),
+        (L("Agenten", "Agents"), "cable.connector"),
         (L("Datenschutz & Werbung", "Privacy & ads"), "hand.raised"),
         (L("Downloads", "Downloads"), "arrow.down.circle"),
         (L("Erweiterungen"), "puzzlepiece.extension"),
@@ -28,7 +30,7 @@ struct BrowserSettings: View {
                 }.padding(.horizontal, 18).padding(.top, 25).padding(.bottom, 24)
                 VStack(spacing: 5) {
                     ForEach(sections, id: \.0) { item in
-                        Button { section = item.0 } label: {
+                        Button { section = item.0; model.settingsSection = item.0 } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: item.1).frame(width: 18)
                                 Text(item.0).font(.system(size: 12, weight: section == item.0 ? .semibold : .regular))
@@ -58,16 +60,17 @@ struct BrowserSettings: View {
                     Button { model.showSettings = false } label: {
                         Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).frame(width: 30, height: 30)
                             .background(YOBROTheme.surface.opacity(0.6), in: Circle())
-                    }.buttonStyle(.plain).help(L("Schließen", "Close")).keyboardShortcut(.cancelAction)
+                    }.buttonStyle(.plain).yobroHelp(L("Schließen", "Close")).keyboardShortcut(.cancelAction)
                 }
                 Divider().opacity(0.45)
                 Group {
                     switch section {
                     case L("Allgemein", "General"): GeneralSettings(model: model)
                     case L("Sync", "Sync"): SyncSettings(model: model)
+                    case L("Agenten", "Agents"): AgentConnectionsView(model: model)
                     case L("Datenschutz & Werbung", "Privacy & ads"): AdBlockSettings(model: model)
                     case L("Downloads", "Downloads"): DownloadSettings(model: model)
-                    case L("Erweiterungen"): ExtensionSettings(store: model.extensions, model: model)
+                    case L("Erweiterungen"): ScrollView { ExtensionSettings(store: model.extensions, model: model) }
                     case L("Daten importieren"): BrowserImportView(model: model)
                     case L("Lesezeichen"): BookmarkSettings(model: model)
                     case L("Proxy / VPN"): SpaceProxySettingsView(model: model)
@@ -78,6 +81,7 @@ struct BrowserSettings: View {
         }
         .frame(width: 860, height: 650).background(paper).foregroundStyle(ink)
         .textFieldStyle(YOBROTextFieldStyle()).tint(moss)
+        .onChange(of: model.settingsSection) { _, value in section = value }
     }
 }
 
@@ -173,6 +177,23 @@ struct GeneralSettings: View {
                 .toggleStyle(.switch)
                 .tint(moss)
                 .yobroCard(padding: 16)
+
+                YOBROSettingsHeading(
+                    icon: "bolt.badge.clock",
+                    title: L("Leistung & Arbeitsspeicher", "Performance & Memory"),
+                    detail: L("Schone den Arbeitsspeicher deines Mac durch automatisches Entlasten inaktiver Tabs.", "Save Mac memory by automatically suspending inactive tabs.")
+                )
+                Toggle(isOn: $model.autoSuspendInactiveTabs) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L("Inaktive Tabs nach 30 Minuten schlafen legen", "Suspend inactive tabs after 30 minutes"))
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(L("Gibt Arbeitsspeicher frei. Beim Anklicken wird der Tab an genau derselben Stelle wiederhergestellt. Tabs mit aktiver Medienwiedergabe bleiben geöffnet.", "Frees up RAM. Clicking the tab restores it right where you left off. Tabs actively playing media remain untouched."))
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(moss)
+                .yobroCard(padding: 16)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { defaultBrowser.refresh() }
@@ -261,9 +282,10 @@ struct SyncSettings: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject private var sync: BrowserSyncStore
     @State private var email = ""
-    @State private var password = ""
+    @State private var otp = ""
     @State private var recovery = ""
-    @State private var newPassword = ""
+    @State private var pairingCode: DevicePairingCode?
+    @State private var pairingError: String?
 
     init(model: BrowserModel) {
         self.model = model
@@ -274,25 +296,19 @@ struct SyncSettings: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 YOBROSettingsHeading(icon: "arrow.triangle.2.circlepath", title: L("Dein Browser auf allen Geräten", "Your browser on every device"), detail: L("Tabs, Spaces, Ordner, Lesezeichen und bereinigter Verlauf werden vor dem Upload auf deinem Gerät verschlüsselt.", "Tabs, spaces, folders, bookmarks, and sanitized history are encrypted on your device before upload."))
-                if sync.needsNewPassword {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(L("Neues Passwort festlegen", "Choose a new password"), systemImage: "lock.rotation")
-                            .font(.system(size: 13, weight: .semibold))
-                        SecureField(L("Neues Passwort (mindestens 8 Zeichen)", "New password (at least 8 characters)"), text: $newPassword)
-                        Button(L("Passwort speichern", "Save password")) {
-                            Task { await sync.updatePassword(newPassword, model: model); newPassword = "" }
-                        }
-                        .buttonStyle(.borderedProminent).tint(moss)
-                        .disabled(newPassword.count < 8 || sync.busy)
-                        Text(sync.status).font(.system(size: 11)).foregroundStyle(.secondary)
-                    }.yobroCard(padding: 15, emphasized: true)
-                } else if sync.signedIn {
+                if sync.signedIn {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(sync.email, systemImage: "person.crop.circle.badge.checkmark").font(.system(size: 13, weight: .semibold))
                         Text(sync.status).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
                         HStack {
                             Button(L("Jetzt synchronisieren", "Sync now")) { Task { await sync.syncNow(model) } }
                                 .buttonStyle(.borderedProminent).tint(moss).disabled(sync.busy)
+                            Button(L("iPhone per QR verbinden", "Connect iPhone by QR")) {
+                                Task {
+                                    do { pairingCode = try await sync.createDevicePairingCode() }
+                                    catch { pairingError = error.localizedDescription }
+                                }
+                            }
                             if sync.busy { ProgressView().controlSize(.small) }
                             Spacer()
                             Button(L("Abmelden", "Sign out")) { Task { await sync.signOut() } }
@@ -313,27 +329,35 @@ struct SyncSettings: View {
                             Button(L("Code anzeigen", "Show code")) { sync.revealRecoveryCode() }
                         }
                     }.yobroCard(padding: 15)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(L("Verbundene Geräte", "Connected devices"), systemImage: "iphone.and.arrow.forward")
+                            .font(.system(size: 12, weight: .semibold))
+                        if sync.devices.isEmpty { Text(L("Noch kein zusätzliches Gerät verbunden.", "No additional device connected yet.")).font(.system(size: 11)).foregroundStyle(.secondary) }
+                        ForEach(sync.devices) { device in
+                            HStack { Image(systemName: device.platform == "ios" ? "iphone" : "laptopcomputer"); Text(device.label); Spacer(); Text(device.last_used_at.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 10)).foregroundStyle(.secondary) }
+                        }
+                    }.yobroCard(padding: 15)
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
-                        TextField(L("E-Mail", "Email"), text: $email).textContentType(.emailAddress)
-                        SecureField(L("Passwort (mindestens 6 Zeichen)", "Password (at least 6 characters)"), text: $password)
+                        if sync.otpRequested {
+                            TextField(L("Code aus der E-Mail", "Code from your email"), text: $otp).textContentType(.oneTimeCode)
+                            Text(L("Gesendet an \(sync.otpEmail)", "Sent to \(sync.otpEmail)")).font(.system(size: 11)).foregroundStyle(.secondary)
+                        } else {
+                            TextField(L("E-Mail", "Email"), text: $email).textContentType(.emailAddress)
+                        }
                         SecureField(L("Wiederherstellungscode · nur auf weiteren Geräten", "Recovery code · only on additional devices"), text: $recovery)
                         HStack {
-                            Button(L("Anmelden", "Sign in")) { Task { await sync.signIn(email: email, password: password, recoveryCode: recovery, model: model); password = ""; recovery = "" } }
+                            Button(sync.otpRequested ? L("Code bestätigen", "Verify code") : L("Code senden", "Send code")) {
+                                Task {
+                                    if sync.otpRequested { await sync.verifyOTP(otp, recoveryCode: recovery, model: model); otp = ""; recovery = "" }
+                                    else { await sync.requestOTP(email: email) }
+                                }
+                            }
                                 .buttonStyle(.borderedProminent).tint(moss)
-                            Button(L("Konto erstellen", "Create account")) { Task { await sync.signUp(email: email, password: password, model: model); password = "" } }
+                            if sync.otpRequested { Button(L("Andere E-Mail", "Different email")) { sync.cancelOTP(); otp = "" } }
                             if sync.busy { ProgressView().controlSize(.small) }
-                        }.disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.count < 6 || sync.busy)
-                        HStack(spacing: 16) {
-                            Button(L("Bestätigung erneut senden", "Resend confirmation")) {
-                                Task { await sync.resendConfirmation(email: email) }
-                            }
-                            Button(L("Passwort vergessen?", "Forgot password?")) {
-                                Task { await sync.requestPasswordReset(email: email) }
-                            }
-                        }
-                        .buttonStyle(.plain).foregroundStyle(moss)
-                        .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sync.busy)
+                        }.disabled(sync.busy || (sync.otpRequested ? otp.isEmpty : email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                         Text(sync.status).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
                     }.yobroCard(padding: 15, emphasized: true)
                 }
@@ -345,100 +369,49 @@ struct SyncSettings: View {
                 }.yobroCard(padding: 15)
             }
         }
-        .onAppear { if email.isEmpty { email = sync.email } }
+        .sheet(item: $pairingCode) { code in DevicePairingQRView(code: code) }
+        .alert(L("Kopplung nicht möglich", "Could not pair"), isPresented: Binding(get: { pairingError != nil }, set: { if !$0 { pairingError = nil } })) { Button("OK") {} } message: { Text(pairingError ?? "") }
+        .onAppear { if email.isEmpty { email = sync.email }; Task { await sync.loadDevices() } }
+        .onDisappear { otp = ""; recovery = "" }
+    }
+}
+
+private struct DevicePairingQRView: View {
+    let code: DevicePairingCode
+    @Environment(\.dismiss) private var dismiss
+    private var payload: String { (try? code.encoded()) ?? "" }
+    private var image: NSImage? {
+        let filter = CIFilter.qrCodeGenerator(); filter.message = Data(payload.utf8); filter.correctionLevel = "Q"
+        guard let output = filter.outputImage?.transformed(by: .init(scaleX: 8, y: 8)) else { return nil }
+        return NSImage(cgImage: CIContext().createCGImage(output, from: output.extent)!, size: output.extent.size)
+    }
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 9) { YOBROMark(size: 26); Text("YoBro").font(.system(size: 16, weight: .bold)) }
+            Text(L("iPhone verbinden", "Connect iPhone")).font(.title2.bold())
+            Text(L("Öffne YoBro auf dem iPhone und scanne diesen Code. Er ist nur zehn Minuten gültig und kann einmal verwendet werden.", "Open YoBro on your iPhone and scan this code. It expires in ten minutes and works once.")).multilineTextAlignment(.center).foregroundStyle(.secondary)
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 270, height: 270)
+                    .padding(16)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 24))
+                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(moss.opacity(0.45), lineWidth: 2))
+            }
+            Button(L("Code kopieren · Simulator", "Copy code · Simulator")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(payload, forType: .string) }
+            Button(L("Fertig", "Done")) { dismiss() }.buttonStyle(.borderedProminent)
+        }.padding(28).frame(width: 430).background(YOBROTheme.page)
     }
 }
 
 struct AdBlockSettings: View {
     @ObservedObject var model: BrowserModel
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                YOBROSettingsHeading(
-                    icon: "shield.lefthalf.filled",
-                    title: L("Ruhiger und privater surfen", "Browse with less noise and more privacy"),
-                    detail: L("YoBro blockiert bekannte Werbe- und Tracking-Anfragen direkt in WebKit, bevor sie geladen werden.", "YoBro blocks known advertising and tracking requests directly in WebKit before they load.")
-                )
-
-                HStack(spacing: 14) {
-                    Image(systemName: model.adBlocker.enabled ? "shield.checkered" : "shield.slash")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(model.adBlocker.enabled ? moss : .secondary)
-                        .frame(width: 42, height: 42)
-                        .background(YOBROTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 11))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Werbung und Tracker blockieren", "Block ads and trackers"))
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(model.adBlocker.enabled
-                             ? L("Aktiv auf allen Webseiten", "Active on every website")
-                             : L("Deaktiviert", "Disabled"))
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: Binding(
-                        get: { model.adBlocker.enabled },
-                        set: { model.setAdBlockingEnabled($0) }
-                    ))
-                    .labelsHidden().toggleStyle(.switch)
-                }
-                .yobroCard(padding: 15, emphasized: true)
-
-                HStack(spacing: 14) {
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(model.adBlocker.strictProtection ? moss : .secondary)
-                        .frame(width: 42, height: 42)
-                        .background(YOBROTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 11))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Strikter Schutz", "Strict protection"))
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(model.adBlocker.strictProtection
-                             ? L("Keine Website-Ausnahmen oder Wiedergabe-Manipulation", "No website exceptions or playback manipulation")
-                             : L("Zusätzliche Seitenfilter aktiv", "Additional page filters active"))
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: Binding(
-                        get: { model.adBlocker.strictProtection },
-                        set: { model.setStrictAdBlockingEnabled($0) }
-                    ))
-                    .labelsHidden().toggleStyle(.switch)
-                }
-                .disabled(!model.adBlocker.enabled)
-                .yobroCard(padding: 15)
-
-                if model.adBlocker.enabled && model.adBlocker.strictProtection {
-                    Label(
-                        L("YouTube und andere Seiten können die Wiedergabe sperren. YoBro gibt dafür keine Werbe-Domains frei und versucht nicht, die Sperre zu umgehen.", "YouTube and other sites may block playback. YoBro does not allow advertising domains or attempt to bypass the restriction."),
-                        systemImage: "exclamationmark.shield"
-                    )
-                    .font(.system(size: 11)).foregroundStyle(.orange)
-                    .yobroCard(padding: 13)
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(L("Netzwerk-Blockierung", "Network blocking"), systemImage: "network.slash")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(L("Blockiert Anfragen zu \(AdBlocker.blockedDomains.count) bekannten Werbe-, Analyse- und Tracking-Diensten. Die Daten verlassen deinen Mac gar nicht erst.", "Blocks requests to \(AdBlocker.blockedDomains.count) known advertising, analytics, and tracking services. The data never leaves your Mac."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                    Divider().opacity(0.45)
-                    Label(L("Kosmetische Filter", "Cosmetic filters"), systemImage: "rectangle.compress.vertical")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(L("Entfernt übrig gebliebene leere Werbeflächen auf vielen Seiten.", "Removes leftover empty advertising areas on many sites."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                .yobroCard(padding: 15)
-
-                if let error = model.adBlocker.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11)).foregroundStyle(.orange)
-                }
-
-                Text(L("Manche Werbung ist direkt in Videos oder Seiteninhalte eingebaut und lässt sich nicht zuverlässig per Netzwerkfilter entfernen. Falls eine Seite nicht richtig funktioniert, kannst du den Schutz hier vorübergehend ausschalten.", "Some advertising is embedded directly in videos or page content and cannot be removed reliably by a network filter. If a site does not work correctly, you can temporarily turn protection off here."))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-
-                Divider().opacity(0.45)
+                ExtensionSettings(store: model.extensions, model: model)
                 WebsiteDataSettings(model: model)
                 BridgeAccessSettings(model: model)
             }
@@ -446,8 +419,6 @@ struct AdBlockSettings: View {
     }
 }
 
-/// Exposes what the local agent socket can reach, and lets the user decide about
-/// the one part that hands out stored data on its own.
 struct BridgeAccessSettings: View {
     @ObservedObject var model: BrowserModel
 
@@ -550,19 +521,37 @@ struct ExtensionSettings: View {
     @ObservedObject var model: BrowserModel
     @State private var removing: InstalledExtension?
     @State private var storeLink = ""
+    @State private var extensionSearch = ""
     var body: some View {
-        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             YOBROSettingsHeading(icon: "puzzlepiece.extension.fill", title: L("Erweiterungen für deinen Browser", "Extensions for your browser"), detail: store.supported ? L("Installiere kompatible WebExtensions lokal oder direkt über einen Link aus dem Chrome Web Store.", "Install compatible WebExtensions locally or from a Chrome Web Store link.") : L("Erweiterungen benötigen macOS 15.4 oder neuer.", "Extensions require macOS 15.4 or later."))
-            HStack {
-                Button(L("Erweiterung hinzufügen …"), systemImage: "plus") { store.choose() }.buttonStyle(.borderedProminent).tint(moss).disabled(!store.supported || store.busy || store.pending != nil)
-                if store.busy { ProgressView().controlSize(.small) }
-            }
-            HStack {
-                Button(L("Marktplatz öffnen"), systemImage: "bag") { model.showSettings = false; model.newTab(url: "https://chromewebstore.google.com/category/extensions") }
-                TextField(L("Chrome-Web-Store-Link oder Erweiterungs-ID"), text: $storeLink)
-                Button(L("Laden")) { Task { await store.prepareFromStore(storeLink) } }.disabled(storeLink.isEmpty || store.busy || !store.supported)
-            }.font(.system(size: 11))
+            IncludedBrowserFeatures(store: store, appearance: model.webAppearance)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L("Mehr für deinen Browser", "Make it yours")).font(.headline)
+                Text(L("Entdecke WebExtensions im Chrome Web Store. YoBro prüft das Paket vor der Installation; manche Chrome-APIs sind in WebKit nicht verfügbar.", "Discover WebExtensions in the Chrome Web Store. YoBro checks the package before installation; some Chrome APIs are unavailable in WebKit."))
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    TextField(L("Erweiterungen suchen", "Search extensions"), text: $extensionSearch)
+                        .onSubmit { searchExtensions() }
+                    Button(L("Suchen", "Search"), systemImage: "magnifyingglass") { searchExtensions() }
+                        .disabled(extensionSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button(L("Katalog öffnen", "Browse catalog")) { model.showSettings = false; model.newTab(url: ExtensionCatalog.storeURL) }
+                }
+                HStack {
+                    TextField(L("Chrome-Web-Store-Link oder Erweiterungs-ID", "Chrome Web Store link or extension ID"), text: $storeLink)
+                    Button(L("Paket prüfen", "Review package")) { Task { await store.prepareFromStore(storeLink) } }
+                        .disabled(storeLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.busy || !store.supported || store.pending != nil)
+                    if store.busy { ProgressView().controlSize(.small) }
+                }
+                Button(L("Lokales Paket öffnen …", "Open local package …"), systemImage: "folder") { store.choose() }
+                    .disabled(!store.supported || store.busy || store.pending != nil)
+                DisclosureGroup(L("Was ist mit Safari-Erweiterungen?", "What about Safari extensions?")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L("Apps aus Apples Safari-Katalog werden in Safari installiert. Für YoBro brauchst du ein kompatibles WebExtension-Paket als Ordner, ZIP oder CRX. Unser Katalog-Link ist nicht an einen Länder-Store gebunden; die Verfügbarkeit beim Anbieter kann regional variieren.", "Apps from Apple's Safari catalog install in Safari. YoBro needs a compatible WebExtension folder, ZIP or CRX. Our catalog link is not tied to a country storefront; provider availability may vary by region."))
+                        Button(L("Safari-Format bei Apple erklärt", "Apple's guide to Safari extensions")) { model.showSettings = false; model.newTab(url: ExtensionCatalog.safariInformationURL) }
+                    }.font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+                }
+            }.yobroCard(padding: 16)
             if let pending = store.pending {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("\(pending.name) · \(pending.version)").font(.headline)
@@ -575,11 +564,12 @@ struct ExtensionSettings: View {
                     Text(L("Nur aus vertrauenswürdiger Quelle installieren. CRX-Dateien werden als lokale Pakete geladen; die Herausgebersignatur wird dabei nicht geprüft.")).font(.system(size: 11)).foregroundStyle(.secondary)
                     HStack {
                         Button(L("Abbrechen")) { store.cancelPending() }.disabled(store.busy)
-                        Button(L("Zugriff erlauben und installieren")) { Task { await store.installPending() } }.buttonStyle(.borderedProminent).tint(moss)
+                        Button(L("Zugriff erlauben und installieren")) { Task { await store.installPending() } }.disabled(store.busy).buttonStyle(.borderedProminent).tint(moss)
                     }
                 }.yobroCard(padding: 15, emphasized: true)
             }
             if let message = store.message { Text(message).font(.system(size: 12)).textSelection(.enabled) }
+            Text(L("Installiert", "Installed")).font(.headline)
             Group {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if store.entries.isEmpty && store.pending == nil {
@@ -612,13 +602,17 @@ struct ExtensionSettings: View {
             }
             Text(L("Nicht verfügbar: native Begleitprogramme sowie Erweiterungszugriff auf YoBro-Lesezeichen, Verlauf, Downloads und Sitzungsverwaltung. Andere API-Unterschiede können einzelne Erweiterungen einschränken."))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-        }
         }.overlay {
             if let entry = removing {
                 YOBRODialogOverlay(icon: "puzzlepiece.extension.fill", title: L("Erweiterung entfernen?"), message: entry.name, confirmTitle: L("Entfernen"), cancelTitle: L("Abbrechen"), destructive: true, confirm: { store.remove(entry); removing = nil }, cancel: { removing = nil })
             }
         }
-        .onDisappear { store.cancelPending() }
+        .onDisappear { if !store.busy { store.cancelPending() } }
+    }
+    private func searchExtensions() {
+        guard let url = ExtensionCatalog.searchURL(extensionSearch) else { return }
+        model.showSettings = false
+        model.newTab(url: url.absoluteString)
     }
 }
 
@@ -748,7 +742,7 @@ struct BookmarkSettings: View {
                                     Text("\(entry.folder) · \(entry.url)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }.buttonStyle(YOBROButtonStyle())
-                            Button { remove(entry) } label: { Image(systemName: "trash") }.buttonStyle(YOBROButtonStyle()).help(L("Lesezeichen entfernen"))
+                            Button { remove(entry) } label: { Image(systemName: "trash") }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("Lesezeichen entfernen"))
                         }.yobroCard(padding: 8)
                     }
                 }
@@ -819,6 +813,6 @@ struct ExtensionToolbar: View {
             Divider()
             Button(L("Erweiterungen und Import …")) { model.showSettings = true }
         } label: { Image(systemName: "puzzlepiece.extension").frame(width: 30, height: 36) }
-            .menuStyle(.borderlessButton).fixedSize().help(L("Erweiterungen"))
+            .menuStyle(.borderlessButton).fixedSize().yobroHelp(L("Erweiterungen"))
     }
 }

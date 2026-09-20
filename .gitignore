@@ -6,6 +6,11 @@ dist/
 __pycache__/
 .DS_Store
 .yobro-signing-identity
+*.p12
+*.mobileprovision
+.env
+.env.*
+supabase/.temp/
 chromium/build/
 .chromium-runtime/
 .ref-webkit/

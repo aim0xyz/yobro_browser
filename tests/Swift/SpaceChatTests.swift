@@ -203,6 +203,109 @@ final class SpaceChatTests: XCTestCase {
         XCTAssertEqual(chat.entries.last?.text, "Summary")
         XCTAssertNil(chat.contexts[browser.space])
     }
+    @MainActor
+    func testSystemPromptIncludesFullBrowserAutomationCapabilities() async throws {
+        let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }
+        var capturedBody = ""
+        browser.chat.transport = { request in
+            capturedBody = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+            return try self.response(request, message: ["role": "assistant", "content": "Ich kann das Formular für dich ausfüllen und absenden."])
+        }
+        browser.chat.drafts[browser.space] = "Beantworte diesen Post und fülle das Formular aus"
+        browser.chat.send(browser: browser)
+        try await finish(browser)
+        XCTAssertTrue(capturedBody.contains("full browser automation capabilities"))
+        XCTAssertTrue(capturedBody.contains("click_element"))
+        XCTAssertTrue(capturedBody.contains("fill_element"))
+        XCTAssertTrue(capturedBody.contains("press_key"))
+        XCTAssertTrue(capturedBody.contains("scroll_page"))
+        XCTAssertEqual(browser.chat.entries.last?.text, "Ich kann das Formular für dich ausfüllen und absenden.")
+    }
+
+    @MainActor
+    func testClickAndFillElementToolsExecuteOnPage() async throws {
+        let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }
+        let tab = browser.newAgentTab()
+        let html = """
+        <html><body>
+          <input id="search-input" type="text" value="" />
+          <button id="search-btn" onclick="document.body.setAttribute('data-clicked', 'true')">Search</button>
+        </body></html>
+        """
+        tab.webView.loadHTMLString(html, baseURL: URL(string: "https://fixture.invalid"))
+
+        var calls = 0
+        var docID = ""
+        var inputRef = ""
+        var buttonRef = ""
+
+        browser.chat.transport = { request in
+            calls += 1
+            if calls == 1 {
+                // Step 1: LLM calls read_tab
+                return try self.response(request, message: [
+                    "role": "assistant",
+                    "tool_calls": [[
+                        "id": "c1",
+                        "type": "function",
+                        "function": ["name": "read_tab", "arguments": "{\"tab\":\"\(tab.id.uuidString)\"}"]
+                    ]]
+                ])
+            } else if calls == 2 {
+                // LLM inspects tool output and calls fill_element
+                let reqBody = String(decoding: request.httpBody!, as: UTF8.self)
+                XCTAssertTrue(reqBody.contains("Search"))
+                return try self.response(request, message: [
+                    "role": "assistant",
+                    "tool_calls": [[
+                        "id": "c2",
+                        "type": "function",
+                        "function": [
+                            "name": "fill_element",
+                            "arguments": "{\"tab\":\"\(tab.id.uuidString)\",\"document\":\"\(docID)\",\"ref\":\"\(inputRef)\",\"value\":\"YoBro search text\"}"
+                        ]
+                    ]]
+                ])
+            } else if calls == 3 {
+                // Step 3: LLM calls click_element
+                return try self.response(request, message: [
+                    "role": "assistant",
+                    "tool_calls": [[
+                        "id": "c3",
+                        "type": "function",
+                        "function": [
+                            "name": "click_element",
+                            "arguments": "{\"tab\":\"\(tab.id.uuidString)\",\"document\":\"\(docID)\",\"ref\":\"\(buttonRef)\"}"
+                        ]
+                    ]]
+                ])
+            }
+            return try self.response(request, message: ["role": "assistant", "content": "Suche erfolgreich abgeschickt!"])
+        }
+
+        // Pre-fetch the real document ID and refs from page for deterministic test calls
+        _ = try await browser.handle(["command": "read", "tab": tab.id.uuidString])
+        let prep = try await browser.handle(["command": "read", "tab": tab.id.uuidString])
+        if let page = prep["page"] as? [String: Any] {
+            docID = page["document"] as? String ?? ""
+            if let elements = page["elements"] as? [[String: Any]] {
+                inputRef = elements.first(where: { ($0["tag"] as? String) == "input" })?["ref"] as? String ?? ""
+                buttonRef = elements.first(where: { ($0["tag"] as? String) == "button" })?["ref"] as? String ?? ""
+            }
+        }
+
+        browser.chat.drafts[browser.space] = "Suche nach YoBro"
+        browser.chat.send(browser: browser)
+        try await finish(browser)
+        XCTAssertEqual(calls, 4)
+        XCTAssertEqual(browser.chat.entries.last?.text, "Suche erfolgreich abgeschickt!")
+
+        // Verify that the element in the webView actually received the value and click!
+        let inputValue = try await tab.webView.evaluateJavaScript("document.getElementById('search-input').value") as? String
+        let clicked = try await tab.webView.evaluateJavaScript("document.body.getAttribute('data-clicked')") as? String
+        XCTAssertEqual(inputValue, "YoBro search text")
+        XCTAssertEqual(clicked, "true")
+    }
 
     @MainActor
     func testTwoConsecutiveMessagesKeepTheCompleteConversation() async throws {
@@ -246,6 +349,54 @@ final class SpaceChatTests: XCTestCase {
         XCTAssertEqual(calls, 2)
         XCTAssertNil(browser.agentTab)
     }
+    @MainActor
+    func testLongNoteReadReturnsValidPagedJSON() async throws {
+        let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }
+        let note = browser.newNote(title: "Long research")
+        note.noteContent = String(repeating: "\"\n", count: 20_000)
+        var calls = 0
+        browser.chat.transport = { request in
+            calls += 1
+            if calls == 1 {
+                let args = try JSONSerialization.data(withJSONObject: ["id": note.id.uuidString])
+                return try self.response(request, message: ["role": "assistant", "tool_calls": [["id": "read-note", "type": "function", "function": ["name": "read_note", "arguments": String(decoding: args, as: UTF8.self)]]]])
+            }
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: Any])
+            let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+            let result = try XCTUnwrap(messages.last?["content"] as? String)
+            let page = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
+            XCTAssertEqual((page["content"] as? String)?.count, 20_000)
+            XCTAssertEqual(page["hasMore"] as? Bool, true)
+            XCTAssertEqual(page["nextOffset"] as? Int, 20_000)
+            return try self.response(request, message: ["role": "assistant", "content": "Read page."])
+        }
+        browser.chat.drafts[browser.space] = "Read the note"
+        browser.chat.send(browser: browser)
+        try await finish(browser)
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor
+    func testOversizedNoteAppendPreservesExistingContent() async throws {
+        let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }
+        let note = browser.newNote(title: "Keep me")
+        note.noteContent = String(repeating: "a", count: 99_999)
+        var calls = 0
+        browser.chat.transport = { request in
+            calls += 1
+            if calls == 1 {
+                let args = try JSONSerialization.data(withJSONObject: ["id": note.id.uuidString, "content": "new content", "mode": "append"])
+                return try self.response(request, message: ["role": "assistant", "tool_calls": [["id": "write-note", "type": "function", "function": ["name": "write_note", "arguments": String(decoding: args, as: UTF8.self)]]]])
+            }
+            XCTAssertTrue(String(decoding: request.httpBody!, as: UTF8.self).contains("Existing content was preserved"))
+            return try self.response(request, message: ["role": "assistant", "content": "Note full."])
+        }
+        browser.chat.drafts[browser.space] = "Append findings"
+        browser.chat.send(browser: browser)
+        try await finish(browser)
+        XCTAssertEqual(note.noteContent, String(repeating: "a", count: 99_999))
+    }
+
     @MainActor
     func testAgentCanCreateNoteInCurrentSpace() async throws {
         let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }
@@ -354,6 +505,57 @@ final class SpaceChatTests: XCTestCase {
         XCTAssertTrue(browser.chat.entries.contains { $0.kind == "action" && $0.text.hasPrefix("read:") })
         XCTAssertEqual(browser.chat.entries.last?.text, "Price: 42")
     }
+    @MainActor
+    func testStaleElementActionRecoversWithFreshSnapshot() async throws {
+        let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }
+        let tab = browser.newAgentTab()
+        tab.webView.loadHTMLString("""
+        <html><body>
+          <button id="ghost" onclick="void 0">Ghost button</button>
+          <button id="fresh" onclick="document.body.setAttribute('data-clicked', 'true')">Fresh button</button>
+        </body></html>
+        """, baseURL: URL(string: "https://fixture.invalid"))
+        // Capture refs like a model would from a read, then re-render the page
+        // so the snapshotted element leaves the DOM before the click.
+        let prep = try await browser.handle(["command": "read", "tab": tab.id.uuidString])
+        var refs: [String: String] = [:]
+        if let page = prep["page"] as? [String: Any], let elements = page["elements"] as? [[String: Any]] {
+            for element in elements {
+                if let label = element["label"] as? String, let ref = element["ref"] as? String { refs[label] = ref }
+            }
+        }
+        let staleRef = try XCTUnwrap(refs["Ghost button"])
+        let freshRef = try XCTUnwrap(refs["Fresh button"])
+        try await tab.webView.evaluateJavaScript("document.getElementById('ghost').remove(); true")
+
+        var calls = 0
+        browser.chat.transport = { request in
+            calls += 1
+            if calls == 1 {
+                return try self.response(request, message: ["role": "assistant", "tool_calls": [["id": "stale", "type": "function", "function": ["name": "click_element", "arguments": "{\"tab\":\"\(tab.id.uuidString)\",\"document\":\"outdated\",\"ref\":\"\(staleRef)\"}"]]]])
+            }
+            if calls == 2 {
+                // The failed click must reach the model as a tool result instead
+                // of ending the run.
+                XCTAssertTrue(String(decoding: request.httpBody!, as: UTF8.self).contains("The page changed. Read a fresh snapshot before acting."))
+                return try self.response(request, message: ["role": "assistant", "tool_calls": [["id": "reread", "type": "function", "function": ["name": "read_tab", "arguments": "{\"tab\":\"\(tab.id.uuidString)\"}"]]]])
+            }
+            if calls == 3 {
+                return try self.response(request, message: ["role": "assistant", "tool_calls": [["id": "retry", "type": "function", "function": ["name": "click_element", "arguments": "{\"tab\":\"\(tab.id.uuidString)\",\"document\":\"current\",\"ref\":\"\(freshRef)\"}"]]]])
+            }
+            return try self.response(request, message: ["role": "assistant", "content": "Kommentar analysiert."])
+        }
+        browser.chat.drafts[browser.space] = "Analysiere den Post"
+        browser.chat.send(browser: browser)
+        try await finish(browser)
+        XCTAssertEqual(calls, 4)
+        XCTAssertNil(browser.chat.error)
+        XCTAssertFalse(browser.chat.entries.contains { $0.kind == "error" })
+        XCTAssertEqual(browser.chat.entries.last?.text, "Kommentar analysiert.")
+        let clicked = try await tab.webView.evaluateJavaScript("document.body.getAttribute('data-clicked')") as? String
+        XCTAssertEqual(clicked, "true")
+    }
+
     @MainActor
     func testPanelLayout() async throws {
         let browser = fixture(); defer { try? FileManager.default.removeItem(at: browser.home) }

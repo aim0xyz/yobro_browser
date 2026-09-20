@@ -96,4 +96,38 @@ final class WebAppearanceTests: XCTestCase {
         let result9 = try await js("getComputedStyle(document.body).backgroundColor") as? String
         XCTAssertEqual(result9, "rgb(21, 21, 21)")
     }
+
+    func testAppearanceWebViewHitTestYieldsOnlyWhenOverlayOrDragIsActive() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            UserDefaults.standard.removeObject(forKey: "YOBRO.sidebarAutoHide")
+            try? FileManager.default.removeItem(at: home)
+        }
+        let model = BrowserModel(root: home)
+        model.showSidebar = false
+        model.sidebarAutoHide = true
+        model.sidebarOverlayVisible = false
+
+        let tab = model.newTab()
+        let web = tab.webView as! AppearanceWebView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = web
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let pointInsideSidebarX = NSPoint(x: 100, y: 350)
+        XCTAssertNotNil(web.hitTest(pointInsideSidebarX))
+
+        model.sidebarOverlayVisible = true
+        XCTAssertNil(web.hitTest(pointInsideSidebarX))
+
+        model.sidebarOverlayVisible = false
+        XCTAssertNotNil(web.hitTest(pointInsideSidebarX))
+
+        model.beginSidebarTabDrag(tab.id)
+        XCTAssertNil(web.hitTest(pointInsideSidebarX))
+
+        model.finishSidebarDrag(sessionID: model.sidebarDragSessionID)
+        XCTAssertNotNil(web.hitTest(pointInsideSidebarX))
+    }
 }

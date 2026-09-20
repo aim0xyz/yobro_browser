@@ -139,9 +139,9 @@ int main(int argc, char *argv[]) {
                   "The product sidebar shell is missing its primary navigation.");
             check(preview.window->windowTitle() == QStringLiteral("YOBRO"),
                   "The product window still exposes engineering chrome.");
-            auto *openImport = preview.window->findChild<QPushButton *>(QStringLiteral("webkitImportButton"));
+            auto *openImport = preview.window->findChild<QAction *>(QStringLiteral("importMenuAction"));
             check(openImport != nullptr, "Import entry point is missing.");
-            openImport->click();
+            openImport->trigger();
             auto *sourceField = preview.window->findChild<QLineEdit *>(QStringLiteral("webkitImportSource"));
             auto *previewButton = preview.window->findChild<QPushButton *>(QStringLiteral("webkitImportPreview"));
             auto *commitButton = preview.window->findChild<QPushButton *>(QStringLiteral("webkitImportCommit"));
@@ -201,7 +201,7 @@ int main(int argc, char *argv[]) {
                   "Imported bookmark was not retained after profile restart.");
             check(restarted.session->userPages().size() >= 1,
                   "Imported session URL was not restored into the browser controller.");
-            auto *tabs = restarted.window->findChild<QTabWidget *>();
+            auto *tabs = restarted.window->findChild<QTabWidget *>(QStringLiteral("browserTabs"));
             auto *workspaceTree = restarted.window->findChild<QTreeWidget *>(QStringLiteral("workspaceTree"));
             auto *spaces = restarted.window->findChild<QComboBox *>(QStringLiteral("spacePicker"));
             auto *folders = restarted.window->findChild<QComboBox *>(QStringLiteral("folderPicker"));
@@ -217,11 +217,15 @@ int main(int argc, char *argv[]) {
             const QJsonArray restoredFolders = restoredSession.value(QStringLiteral("folders")).toArray();
             check(!restoredFolders.isEmpty() && restoredFolders.at(0).toObject().value(QStringLiteral("color")).toString() == QStringLiteral("#2f6f68"),
                   "Folder color metadata was not retained in the v2 session.");
-            check(workspaceTree->topLevelItemCount() == 1 && workspaceTree->topLevelItem(0)->text(0) == QStringLiteral("◈  ◆ Work"),
+            // The reworked sidebar renders the space (name and icon) in the
+            // space strip, no longer as a tree row above the groups.
+            auto *spaceStrip = restarted.window->findChild<QPushButton *>(QStringLiteral("spaceStripButton"));
+            check(spaceStrip != nullptr && spaceStrip->text().contains(QStringLiteral("Work"))
+                      && spaceStrip->text().contains(QStringLiteral("◆")),
                   "Space icon metadata was not rendered in the workspace sidebar.");
             waitUntil([workspaceTree] {
                 return !workspaceTree->findItems(QStringLiteral("ANGEPINNT"), Qt::MatchExactly | Qt::MatchRecursive).isEmpty()
-                    && !workspaceTree->findItems(QStringLiteral("Project"), Qt::MatchExactly | Qt::MatchRecursive).isEmpty();
+                    && !workspaceTree->findItems(QStringLiteral("Project"), Qt::MatchContains | Qt::MatchRecursive).isEmpty();
             }, "Workspace sidebar did not render pinned and folder groups.");
             const auto pinnedGroups = workspaceTree->findItems(
                 QStringLiteral("ANGEPINNT"), Qt::MatchExactly | Qt::MatchRecursive
@@ -229,7 +233,7 @@ int main(int argc, char *argv[]) {
             check(!pinnedGroups.isEmpty() && pinnedGroups.front()->childCount() == 1,
                   "Pinned restored workspace tab is missing from the sidebar.");
             const auto projectGroups = workspaceTree->findItems(
-                QStringLiteral("Project"), Qt::MatchExactly | Qt::MatchRecursive
+                QStringLiteral("Project"), Qt::MatchContains | Qt::MatchRecursive
             );
             check(!projectGroups.isEmpty(), "Restored Project sidebar group is missing.");
             workspaceTree->collapseItem(projectGroups.front());
@@ -275,7 +279,7 @@ int main(int argc, char *argv[]) {
             PreviewApp restoredCollapse;
             auto *workspaceTree = restoredCollapse.window->findChild<QTreeWidget *>(QStringLiteral("workspaceTree"));
             const auto projectGroups = workspaceTree ? workspaceTree->findItems(
-                QStringLiteral("Project"), Qt::MatchExactly | Qt::MatchRecursive
+                QStringLiteral("Project"), Qt::MatchContains | Qt::MatchRecursive
             ) : QList<QTreeWidgetItem *>{};
             check(!projectGroups.isEmpty() && !projectGroups.front()->isExpanded(),
                   "Collapsed folder state was not restored after profile restart.");

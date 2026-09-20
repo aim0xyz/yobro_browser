@@ -44,6 +44,7 @@ void SpikeWindow::setPermissionSurfaceAllowed(bool allowed) {
 
 void SpikeWindow::showEvent(QShowEvent *event) {
     QMainWindow::showEvent(event);
+    configureMacWindowFrame(this);
     session_.setPermissionSurfaceVisible(
         permissionSurfaceAllowed_ && !testAttribute(Qt::WA_DontShowOnScreen)
     );
@@ -477,6 +478,7 @@ void SpikeWindow::updateNavigationState() {
 void SpikeWindow::applyTheme() {
     const bool dark = systemPrefersDark();
     setStyleSheet(windowStyleSheet(dark));
+    retintIcons(dark);
     // Open sheets are restyled too so a switch while running stays consistent.
     for (QPointer<QDialog> dialog : {downloadsDialog_, libraryDialog_, extensionsDialog_, importDialog_,
                                      quickSwitcherDialog_, settingsDialog_, passwordsDialog_}) {

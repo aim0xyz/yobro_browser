@@ -2,7 +2,32 @@ import SwiftUI
 import WebKit
 
 final class AppearanceWebView: WKWebView {
+    weak var tab: BrowserTab?
     var agentControlled = false
+    private var paneClickMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let paneClickMonitor { NSEvent.removeMonitor(paneClickMonitor); self.paneClickMonitor = nil }
+        guard window != nil else { return }
+        // WebKit delivers clicks to internal child views, so overriding mouseDown
+        // on WKWebView misses links, inputs and much of the page background.
+        paneClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.activatePane(for: event)
+            return event // Preserve the original click, selection and drag behavior.
+        }
+    }
+
+    deinit { if let paneClickMonitor { NSEvent.removeMonitor(paneClickMonitor) } }
+
+    func activatePane(for event: NSEvent) {
+        guard !agentControlled, let window, event.window === window,
+              let content = window.contentView, let tab else { return }
+        let point = content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+        guard let hit = content.hitTest(point), hit === self || hit.isDescendant(of: self) else { return }
+        tab.owner?.activateSplitPane(tab.id)
+    }
+
     override var acceptsFirstResponder: Bool { !agentControlled && super.acceptsFirstResponder }
     override func becomeFirstResponder() -> Bool { !agentControlled && super.becomeFirstResponder() }
 
@@ -10,6 +35,45 @@ final class AppearanceWebView: WKWebView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         appearanceChanged?()
+    }
+
+    private func shouldYieldToSidebar(at windowPoint: NSPoint) -> Bool {
+        guard let model = tab?.owner else { return false }
+        if !model.showSidebar {
+            if windowPoint.x <= 260 && (model.sidebarOverlayVisible || model.draggingTabID != nil || model.draggingFolderID != nil) {
+                return true
+            }
+        }
+        return false
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let windowPoint = convert(point, to: nil)
+        if shouldYieldToSidebar(at: windowPoint) {
+            return nil
+        }
+        return super.hitTest(point)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if shouldYieldToSidebar(at: sender.draggingLocation) {
+            return []
+        }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if shouldYieldToSidebar(at: sender.draggingLocation) {
+            return []
+        }
+        return super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if shouldYieldToSidebar(at: sender.draggingLocation) {
+            return false
+        }
+        return super.performDragOperation(sender)
     }
 
     /// WebKit's context menu offers "Open Link in New Window". YOBRO turns every
@@ -94,7 +158,7 @@ struct WebAppearanceButton: View {
         Button { presented.toggle() } label: {
             Image(systemName: appearance.preferences.enabled && scheme == .dark ? "moon.fill" : "moon")
                 .foregroundStyle(appearance.preferences.enabled ? moss : ink.opacity(0.5))
-        }.buttonStyle(YOBROButtonStyle()).help(L("Webseiten-Darkmode")).popover(isPresented: $presented, arrowEdge: .bottom) {
+        }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("Webseiten-Darkmode")).popover(isPresented: $presented, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 17) {
                 Text(L("Licht nach deinem Rhythmus.")).font(.system(size: 21, design: .serif))
                 Label(scheme == .dark ? L("System ist im Dunkelmodus") : L("System ist im Hellmodus"), systemImage: scheme == .dark ? "moon" : "sun.max")

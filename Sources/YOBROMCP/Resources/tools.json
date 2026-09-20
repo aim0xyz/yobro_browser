@@ -1,0 +1,398 @@
+[
+  {
+    "name": "status",
+    "description": "Check whether the local YOBRO browser is running and agent access is enabled.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "tabs",
+    "description": "List YOBRO tabs and identify user-owned versus agent-owned tabs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_page",
+    "description": "Open a URL in the current YOBRO agent tab, creating the agent pane when needed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "An absolute http or https URL."
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "new_page",
+    "description": "Create a separate YOBRO agent tab and optionally open a URL in it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "An absolute http or https URL."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "read_page",
+    "description": "Read the loaded page's text, headings, and interactive elements. Returns a document UUID and element refs for later actions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "click",
+    "description": "Click an element using a ref and document UUID from the latest read_page result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "document": {
+          "type": "string"
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "document"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "fill",
+    "description": "Set a form field using a ref and document UUID from the latest read_page result. This does not submit the form.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "document": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "document",
+        "value"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "press_key",
+    "description": "Dispatch a keyboard event to an element from the latest read_page. Enter can submit an input's form unless the page cancels it. Other keys invoke page handlers; native typing and Tab traversal are not simulated. Read again to verify the result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "document": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "enum": [
+            "Enter",
+            "Escape",
+            "Tab",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "Home",
+            "End",
+            "Backspace",
+            "Delete",
+            " "
+          ]
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "document",
+        "key"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "scroll",
+    "description": "Scroll the current page vertically. Positive amounts scroll down and negative amounts scroll up.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "minimum": -5000,
+          "maximum": 5000,
+          "default": 600
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "navigate",
+    "description": "Navigate the YOBRO agent tab backward, forward, or reload it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "back",
+            "forward",
+            "reload"
+          ]
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "direction"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "find_on_page",
+    "description": "Use YOBRO's native in-page text search.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "backwards": {
+          "type": "boolean",
+          "default": false
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "history",
+    "description": "Search the active YOBRO profile's local browsing history.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "default": ""
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "downloads",
+    "description": "List downloads from the active YOBRO profile.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "download",
+    "description": "Start downloading an http or https URL through the active YOBRO WebKit session.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "An absolute http or https URL."
+        },
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "duplicate_page",
+    "description": "Duplicate a YOBRO agent tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "close_page",
+    "description": "Close a YOBRO agent-owned tab. User-owned tabs remain protected.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tab": {
+          "type": "string",
+          "description": "Optional YOBRO agent-tab UUID. Omit to use the current agent tab."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "end_session",
+    "description": "End the YOBRO agent session and close its temporary tabs without disabling future access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "openWorldHint": false
+    }
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "name": "yobro-bundled",
+  "interface": {
+    "displayName": "Yobro Bundled"
+  },
+  "plugins": [
+    {
+      "name": "yobro-browser",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yobro-browser"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

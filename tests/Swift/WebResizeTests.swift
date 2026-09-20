@@ -10,6 +10,9 @@ final class WebResizeTests: XCTestCase {
         let previous = getenv("YOBRO_HOME").map { String(cString: $0) }; setenv("YOBRO_HOME", home.path, 1)
         defer { if let previous { setenv("YOBRO_HOME", previous, 1) } else { unsetenv("YOBRO_HOME") }; try? FileManager.default.removeItem(at: home) }
         let model = BrowserModel(); model.showAgent = false
+        let previousAutoHide = model.sidebarAutoHide
+        model.sidebarAutoHide = false
+        defer { model.sidebarAutoHide = previousAutoHide }
         let first = model.newTab()
         // TabContent renders NewTabPage for a tab without a URL, so the WebView
         // would never enter the view hierarchy and every measured frame would be

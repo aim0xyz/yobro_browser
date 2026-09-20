@@ -52,7 +52,7 @@ struct ChromeStore {
 
 extension ExtensionStore {
     func prepareFromStore(_ input: String) async {
-        guard supported, !busy else { return }
+        guard supported, !busy, pending == nil else { return }
         guard let id = ChromeStore.identifier(input) else { message = L("Bitte den Link einer Erweiterung aus dem Chrome Web Store eingeben."); return }
         if entries.contains(where: { $0.storeID == id }) { message = L("Diese Erweiterung ist bereits installiert."); return }
         busy = true; message = L("Paket wird vom Chrome Web Store geladen …")
@@ -74,10 +74,39 @@ struct MarketplaceInstallButton: View {
         if ChromeStore.identifier(tab.url) != nil {
             Button {
                 let address = tab.url
-                model.showSettings = true
+                model.openExtensionsHub()
                 Task { await store.prepareFromStore(address) }
             } label: { Label(L("In YoBro installieren"), systemImage: "puzzlepiece.extension").font(.system(size: 11, weight: .medium)).padding(.horizontal, 8) }
-                .buttonStyle(.borderedProminent).tint(moss).disabled(store.busy || !store.supported)
+                .buttonStyle(.borderedProminent).tint(moss).disabled(store.busy || !store.supported || store.pending != nil)
         }
+    }
+}
+
+struct ExtensionSuggestions: View {
+    @ObservedObject var store: ExtensionStore
+    private let suggestions = [
+        ("Dark Reader", "eimadpbcbfnmbkopoojfekhnkhdbieeh"),
+        ("Bitwarden", "nngceckbapebfimnlniiiahkandclblb")
+    ]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("Weitere Erweiterungen", "More extensions")).font(.headline)
+            ForEach(suggestions, id: \.1) { name, identifier in
+                HStack {
+                    Text(name)
+                    Spacer()
+                    if let entry = store.entries.first(where: { $0.storeID == identifier }) {
+                        Toggle(L("Aktiv", "Enabled"), isOn: Binding(get: { entry.enabled }, set: { _ in Task { await store.toggle(entry) } }))
+                            .toggleStyle(.switch)
+                    } else {
+                        Button(L("Laden", "Download")) { Task { await store.prepareFromStore(identifier) } }
+                    }
+                }
+            }
+            Text(L("Vor der Installation werden die Berechtigungen angezeigt. WebKit-Kompatibilität hängt von der jeweiligen Erweiterung ab. Dark Reader ist alternativ bereits in der Seitendarstellung integriert.", "Permissions are shown before installation. WebKit compatibility depends on each extension. Dark Reader is also already integrated in page appearance."))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .disabled(store.busy || !store.supported || store.pending != nil)
+        .yobroCard(padding: 15)
     }
 }

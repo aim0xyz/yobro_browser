@@ -227,34 +227,64 @@ void SpikeWindow::refreshWorkspaceSidebar() {
     const QSignalBlocker blocker(workspaceTree_);
     workspaceTree_->clear();
 
-    auto *spaceItem = new QTreeWidgetItem(workspaceTree_, {QStringLiteral("◈  ") + spaceIcons_.value(activeSpace_) + QStringLiteral(" ") + activeSpace_});
-    spaceItem->setData(0, Qt::UserRole + 1, activeSpace_);
-    // Only the group rows accept drops, so tabs cannot be nested under a space.
-    spaceItem->setFlags(spaceItem->flags() & ~(Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled));
-    spaceItem->setExpanded(true);
-    spaceItem->setSizeHint(0, QSize(0, 46));
-    // Item text and washes come from the window style sheet so both
-    // appearances stay correct; only folder colours are data-driven.
-    spaceItem->setFont(0, QFont(spaceItem->font(0).family(), -1, QFont::DemiBold));
+    if (spaceStripButton_) {
+        const QString icon = spaceIcons_.value(activeSpace_, QStringLiteral("◇"));
+        int tabCount = 0;
+        for (const auto &tab : session_.tabViews()) {
+            if (tab.state.owner == engine::PageOwner::agent) continue;
+            const auto ws = workspaceTabs_.find(tab.state.id);
+            const QString sp = (ws == workspaceTabs_.end()) ? activeSpace_ : ws->second.space;
+            if (sp == activeSpace_) ++tabCount;
+        }
+        spaceStripButton_->setText(QStringLiteral("%1  %2  %3 ▼").arg(icon, activeSpace_, QString::number(tabCount)));
+    }
 
-    auto addGroup = [spaceItem, this](const QString &label, const QString &name, const QString &folderId = {}, const QString &color = defaultFolderColor()) {
-        auto *group = new QTreeWidgetItem(spaceItem, {label});
+    auto addGroup = [this](const QString &label, const QString &name, const QString &folderId = {}, const QString &color = defaultFolderColor()) {
+        auto *group = new QTreeWidgetItem(workspaceTree_, {label});
         group->setData(0, Qt::UserRole + 2, name);
         group->setData(0, Qt::UserRole + 3, folderId);
         group->setFlags((group->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled)) | Qt::ItemIsDropEnabled);
         group->setForeground(0, QColor(QColor(color).isValid() ? color : themePalette(currentAppearanceIsDark()).textMuted));
         group->setFont(0, QFont(group->font(0).family(), -1, QFont::DemiBold));
-        group->setSizeHint(0, QSize(0, 31));
+        group->setSizeHint(0, QSize(0, 32));
         group->setExpanded(!collapsedFolderIds_.contains(folderId));
         return group;
     };
-    auto *pinnedGroup = addGroup(L(QStringLiteral("ANGEPINNT")), QStringLiteral("pinnedTabsGroup"));
+
+    QTreeWidgetItem *pinnedGroup = nullptr;
+    int pinnedCount = 0;
+    for (const auto &tab : session_.tabViews()) {
+        if (tab.state.owner == engine::PageOwner::agent) continue;
+        const auto ws = workspaceTabs_.find(tab.state.id);
+        if (ws != workspaceTabs_.end() && ws->second.pinned && (ws->second.space == activeSpace_ || tab.privatePage))
+            ++pinnedCount;
+    }
+    for (const auto &note : notes_) {
+        const auto ws = workspaceTabs_.find(note.id.toStdString());
+        if (ws != workspaceTabs_.end() && ws->second.pinned && ws->second.space == activeSpace_)
+            ++pinnedCount;
+    }
+    if (pinnedCount > 0) {
+        pinnedGroup = addGroup(L(QStringLiteral("ANGEPINNT")), QStringLiteral("pinnedTabsGroup"));
+    }
+
     std::map<QString, QTreeWidgetItem *> folderGroups;
     for (const WorkspaceFolder &folder : workspaceFolders_) {
         if (folder.space != activeSpace_) continue;
-        auto *group = addGroup(folder.name, QStringLiteral("folderGroup"), folder.id, folder.color);
+        int folderTabCount = 0;
+        for (const auto &tab : session_.tabViews()) {
+            if (tab.state.owner == engine::PageOwner::agent) continue;
+            const auto ws = workspaceTabs_.find(tab.state.id);
+            if (ws != workspaceTabs_.end() && ws->second.folder == folder.id && ws->second.space == activeSpace_)
+                ++folderTabCount;
+        }
+        const QString folderLabel = folderTabCount > 0
+            ? QStringLiteral("📁  %1  %2").arg(folder.name, QString::number(folderTabCount))
+            : QStringLiteral("📁  %1").arg(folder.name);
+        auto *group = addGroup(folderLabel, QStringLiteral("folderGroup"), folder.id, folder.color);
         folderGroups.emplace(folder.id, group);
     }
+
     auto *unfiledGroup = addGroup(L(QStringLiteral("DEINE TABS")), QStringLiteral("unfiledTabsGroup"));
 
     const engine::BrowserPage *activePage = session_.activeUserPage();
@@ -277,7 +307,7 @@ void SpikeWindow::refreshWorkspaceSidebar() {
         const QString tabSpace = workspace == workspaceTabs_.end() ? activeSpace_ : workspace->second.space;
         if (!tab.privatePage && tabSpace != activeSpace_) continue;
         QTreeWidgetItem *group = unfiledGroup;
-        if (!tab.privatePage && workspace != workspaceTabs_.end() && workspace->second.pinned) {
+        if (!tab.privatePage && workspace != workspaceTabs_.end() && workspace->second.pinned && pinnedGroup) {
             group = pinnedGroup;
         } else if (!tab.privatePage && workspace != workspaceTabs_.end() && !workspace->second.folder.isEmpty()) {
             const auto folder = folderGroups.find(workspace->second.folder);
@@ -294,7 +324,7 @@ void SpikeWindow::refreshWorkspaceSidebar() {
         auto *item = new QTreeWidgetItem(group, {title.left(42)});
         item->setFlags((item->flags() & ~Qt::ItemIsDropEnabled) | Qt::ItemIsDragEnabled);
         if (!tab.privatePage && !favicon.isNull()) item->setIcon(0, favicon);
-        item->setSizeHint(0, QSize(0, 44));
+        item->setSizeHint(0, QSize(0, 38));
         item->setData(0, Qt::UserRole, QString::fromStdString(tab.state.id));
         item->setData(0, Qt::UserRole + 1, tabSpace);
         item->setToolTip(0, QString::fromStdString(tab.state.url));
@@ -315,7 +345,7 @@ void SpikeWindow::refreshWorkspaceSidebar() {
         const QString noteSpace = workspace == workspaceTabs_.end() ? activeSpace_ : workspace->second.space;
         if (noteSpace != activeSpace_) continue;
         QTreeWidgetItem *group = unfiledGroup;
-        if (workspace != workspaceTabs_.end() && workspace->second.pinned) {
+        if (workspace != workspaceTabs_.end() && workspace->second.pinned && pinnedGroup) {
             group = pinnedGroup;
         } else if (workspace != workspaceTabs_.end() && !workspace->second.folder.isEmpty()) {
             const auto folder = folderGroups.find(workspace->second.folder);
@@ -323,7 +353,7 @@ void SpikeWindow::refreshWorkspaceSidebar() {
         }
         auto *item = new QTreeWidgetItem(group, {QStringLiteral("✎  ") + note.editor->displayTitle().left(38)});
         item->setFlags((item->flags() & ~Qt::ItemIsDropEnabled) | Qt::ItemIsDragEnabled);
-        item->setSizeHint(0, QSize(0, 44));
+        item->setSizeHint(0, QSize(0, 38));
         item->setData(0, Qt::UserRole, note.id);
         item->setData(0, Qt::UserRole + 1, noteSpace);
         item->setToolTip(0, L(QStringLiteral("Notiz: "), QStringLiteral("Note: ")) + note.editor->displayTitle());
@@ -344,15 +374,15 @@ void SpikeWindow::scheduleWorkspaceOrderCommit() {
 
 void SpikeWindow::applyWorkspaceOrderFromSidebar() {
     if (!workspaceTree_ || synchronizing_) return;
-    QTreeWidgetItem *spaceItem = workspaceTree_->topLevelItem(0);
-    if (!spaceItem) return;
     int order = 0;
     bool changed = false;
-    for (int groupIndex = 0; groupIndex < spaceItem->childCount(); ++groupIndex) {
-        QTreeWidgetItem *group = spaceItem->child(groupIndex);
+    for (int groupIndex = 0; groupIndex < workspaceTree_->topLevelItemCount(); ++groupIndex) {
+        QTreeWidgetItem *group = workspaceTree_->topLevelItem(groupIndex);
+        if (!group) continue;
         const QString kind = group->data(0, Qt::UserRole + 2).toString();
         for (int tabIndex = 0; tabIndex < group->childCount(); ++tabIndex) {
             QTreeWidgetItem *item = group->child(tabIndex);
+            if (!item) continue;
             const QString pageId = item->data(0, Qt::UserRole).toString();
             if (pageId.isEmpty()) continue;
             const auto entry = workspaceTabs_.find(pageId.toStdString());
@@ -403,9 +433,21 @@ void SpikeWindow::setWorkspaceGroupCollapsed(QTreeWidgetItem *item, bool collaps
 }
 
 void SpikeWindow::setAgentPaneVisible(bool visible) {
-    if (!agentPane_ || !mainSplitter_ || agentPaneVisible_ == visible) return;
+    if (!agentPane_ || !mainSplitter_) return;
     agentPaneVisible_ = visible;
+    if (agentPaneToggle_ && agentPaneToggle_->isChecked() != visible) {
+        const QSignalBlocker blocker(agentPaneToggle_);
+        agentPaneToggle_->setChecked(visible);
+    }
     agentPane_->setVisible(visible);
+    // The agent card names the state, like the WebKit sidebar card does.
+    if (agentPaneToggle_) {
+        agentPaneToggle_->setText(visible
+            ? L(QStringLiteral("●  Agentenfläche offen\nDu links · Agent rechts"),
+                QStringLiteral("●  Agent pane open\nYou left · agent right"))
+            : L(QStringLiteral("●  Bereit für deine Agenten\nEin Browser. Für euch beide."),
+                QStringLiteral("●  Ready for your agents\nOne browser. For both of you.")));
+    }
     if (visible) mainSplitter_->setSizes({880, 480});
     else mainSplitter_->setSizes({1360, 0});
 }

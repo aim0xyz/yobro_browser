@@ -1,6 +1,10 @@
 import Foundation
 import Security
+import CryptoKit
+
+#if os(macOS)
 import AppKit
+#endif
 
 struct SupabaseAuthSession: Codable, Sendable {
     var userID: UUID
@@ -8,6 +12,52 @@ struct SupabaseAuthSession: Codable, Sendable {
     var accessToken: String
     var refreshToken: String
     var expiresAt: Date
+}
+
+/// The QR payload contains no account credential. `bootstrapSecret` expires in
+/// ten minutes and can be redeemed once; `syncKey` only decrypts this profile.
+struct DevicePairingCode: Codable, Equatable, Identifiable {
+    let version: Int
+    let profileID: UUID
+    let bootstrapSecret: String
+    let syncKey: String
+    var id: String { bootstrapSecret }
+
+    func encoded() throws -> String {
+        let data = try JSONEncoder().encode(self)
+        return "yobro-pair:" + data.base64EncodedString()
+    }
+
+    static func decode(_ value: String) throws -> Self {
+        let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "yobro-pair:", with: "")
+        guard let data = Data(base64Encoded: raw), let result = try? JSONDecoder().decode(Self.self, from: data),
+              result.version == 1, result.profileID.uuidString.isEmpty == false,
+              Data(base64Encoded: result.bootstrapSecret) != nil,
+              Data(base64Encoded: result.syncKey)?.count == 32 else {
+            throw YOBROError.message(L("Dieser QR-Code ist ungültig.", "This QR code is invalid."))
+        }
+        return result
+    }
+
+    static func secret() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            preconditionFailure("Secure random generator unavailable")
+        }
+        return Data(bytes).base64EncodedString()
+    }
+    static func hash(_ secret: String) -> String {
+        let digest = SHA256.hash(data: Data(secret.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+struct PairedBrowserDevice: Codable, Identifiable {
+    let id: String
+    let label: String
+    let platform: String
+    let last_used_at: Date
 }
 
 /// Optional override of the sync backend, read from `supabase.json`.
@@ -64,6 +114,21 @@ struct SupabaseAuthClient: Sendable {
     static let callbackURL = "https://yobro.aimoxyz.xyz/auth/callback"
     static let recoveryURL = "https://yobro.aimoxyz.xyz/auth/reset-password"
 
+    static func isAuthURL(_ url: URL) -> Bool {
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if url.scheme?.lowercased() == "yobro", url.host?.lowercased() == "auth" {
+            return ["callback", "reset-password"].contains(path)
+        }
+        return url.scheme?.lowercased() == "https" && url.user == nil && url.password == nil &&
+            (url.port == nil || url.port == 443) &&
+            ["yobro.aimoxyz.xyz", "yobro.lol"].contains(url.host?.lowercased() ?? "") &&
+            ["auth/callback", "auth/reset-password"].contains(path)
+    }
+
+    static func isRecoveryURL(_ url: URL) -> Bool {
+        isAuthURL(url) && (url.lastPathComponent == "reset-password" || authParameters(url)["type"] == "recovery")
+    }
+
     private struct User: Decodable { let id: UUID; let email: String? }
     private struct Response: Decodable {
         let access_token: String?
@@ -98,13 +163,33 @@ struct SupabaseAuthClient: Sendable {
         _ = try await request(path: "auth/v1/resend?redirect_to=\(Self.callbackURL)", body: ["type": "signup", "email": email])
     }
 
+    /// Starts the passwordless flow. `create_user` deliberately remains true:
+    /// the first verified code creates the account, while every later one signs
+    /// the same person back in.
+    func requestEmailOTP(email: String) async throws {
+        try await send(path: "auth/v1/otp", body: ["email": email, "create_user": true])
+    }
+
+    func verifyEmailOTP(email: String, code: String) async throws -> SupabaseAuthSession {
+        let response = try await request(path: "auth/v1/verify", body: ["email": email, "token": code, "type": "email"])
+        return try session(from: response, fallbackEmail: email)
+    }
+
     func session(fromAuthURL url: URL) async throws -> (SupabaseAuthSession, isRecovery: Bool) {
-        guard url.scheme?.lowercased() == "yobro", url.host?.lowercased() == "auth" else {
+        guard Self.isAuthURL(url) else {
             throw YOBROError.message(L("Ungültiger Anmeldelink.", "Invalid authentication link."))
         }
         let parameters = Self.authParameters(url)
         if let error = parameters["error_description"] ?? parameters["error"] {
             throw YOBROError.message(error.replacingOccurrences(of: "+", with: " "))
+        }
+        if let hash = parameters["token_hash"], !hash.isEmpty {
+            let type = Self.isRecoveryURL(url) ? "recovery" : (parameters["type"] ?? "signup")
+            guard ["recovery", "signup", "email"].contains(type) else {
+                throw YOBROError.message(L("Ungültiger Anmeldelink.", "Invalid authentication link."))
+            }
+            let response = try await request(path: "auth/v1/verify", body: ["token_hash": hash, "type": type])
+            return (try session(from: response, fallbackEmail: ""), type == "recovery")
         }
         guard let access = parameters["access_token"], let refresh = parameters["refresh_token"] else {
             throw YOBROError.message(L("Der Anmeldelink ist unvollständig oder abgelaufen.", "The authentication link is incomplete or expired."))
@@ -113,7 +198,7 @@ struct SupabaseAuthClient: Sendable {
         let seconds = Double(parameters["expires_in"] ?? "3600") ?? 3600
         return (SupabaseAuthSession(userID: user.id, email: user.email ?? "", accessToken: access, refreshToken: refresh,
                                     expiresAt: Date().addingTimeInterval(seconds)),
-                parameters["type"] == "recovery" || url.path == "/reset-password")
+                Self.isRecoveryURL(url))
     }
 
     func updatePassword(_ password: String, accessToken: String) async throws {
@@ -162,6 +247,19 @@ struct SupabaseAuthClient: Sendable {
         let (data, response) = try await urlSession.data(for: request)
         try validate(response: response, data: data, fallback: L("Anmeldung fehlgeschlagen.", "Sign-in failed."))
         return try JSONDecoder().decode(Response.self, from: data)
+    }
+
+    private func send(path: String, body: [String: Any]) async throws {
+        guard let endpoint = URL(string: path, relativeTo: Self.projectURL.appendingPathComponent("/"))?.absoluteURL else {
+            throw YOBROError.message(L("Ungültige Auth-Adresse.", "Invalid authentication URL."))
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue(Self.publishableKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try validate(response: response, data: data, fallback: L("Code konnte nicht gesendet werden.", "Could not send code."))
     }
 
     private func currentUser(accessToken: String) async throws -> User {
@@ -226,6 +324,7 @@ enum BrowserSyncSecrets {
     }
 }
 
+#if os(macOS)
 @MainActor
 final class BrowserSyncStore: ObservableObject {
     @Published private(set) var signedIn = false
@@ -234,11 +333,16 @@ final class BrowserSyncStore: ObservableObject {
     @Published private(set) var status = L("Nicht verbunden", "Not connected")
     @Published private(set) var recoveryCode: String?
     @Published private(set) var needsNewPassword = false
+    @Published private(set) var otpRequested = false
+    @Published private(set) var otpEmail = ""
+    @Published private(set) var devices: [PairedBrowserDevice] = []
 
     private struct Metadata: Codable { var revision: Int64? }
     private let profileID: UUID
     private let home: URL
-    private let auth = SupabaseAuthClient()
+    private let auth: SupabaseAuthClient
+    private var passwordRecoverySession: SupabaseAuthSession?
+    var canUpdatePassword: Bool { passwordRecoverySession != nil && !busy }
     private var session: SupabaseAuthSession?
     private var keyData: Data?
     private var revision: Int64?
@@ -250,8 +354,8 @@ final class BrowserSyncStore: ObservableObject {
     private var keyAccount: String { "\(home.path)|\(profileID.uuidString)|encryption-key" }
     private var metadataURL: URL { home.appendingPathComponent("sync-metadata.json") }
 
-    init(home: URL, profileID: UUID) {
-        self.home = home; self.profileID = profileID
+    init(home: URL, profileID: UUID, auth: SupabaseAuthClient = SupabaseAuthClient()) {
+        self.home = home; self.profileID = profileID; self.auth = auth
         if let data = BrowserSyncSecrets.read(account: sessionAccount), let value = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) {
             session = value; email = value.email
         }
@@ -261,24 +365,33 @@ final class BrowserSyncStore: ObservableObject {
         if let data = try? Data(contentsOf: metadataURL) { revision = (try? JSONDecoder().decode(Metadata.self, from: data))?.revision }
     }
 
-    func signIn(email: String, password: String, recoveryCode: String, model: BrowserModel) async {
-        await connect(email: email, password: password, recoveryCode: recoveryCode, model: model)
+    func requestOTP(email: String) async {
+        guard !busy else { return }
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else { status = L("Gib zuerst deine E-Mail-Adresse ein.", "Enter your email address first."); return }
+        busy = true; defer { busy = false }
+        do {
+            try await auth.requestEmailOTP(email: address)
+            self.email = address; otpEmail = address; otpRequested = true
+            status = L("Einmalcode gesendet. Gib ihn hier ein.", "One-time code sent. Enter it here.")
+        } catch { status = error.localizedDescription }
     }
 
-    func signUp(email: String, password: String, model: BrowserModel) async {
-        guard !busy else { return }; busy = true; defer { busy = false }
+    func verifyOTP(_ code: String, recoveryCode: String, model: BrowserModel) async {
+        guard !busy else { return }
+        let token = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !otpEmail.isEmpty, !token.isEmpty else { status = L("Gib den Code aus deiner E-Mail ein.", "Enter the code from your email."); return }
+        busy = true; defer { busy = false }
         do {
-            if let value = try await auth.signUp(email: email, password: password) {
-                try saveSession(value); try ensureKey(from: "")
-                signedIn = true
-                recoveryCode = encodeKey(keyData!)
-                status = L("Konto erstellt und verbunden. Wiederherstellungscode sicher aufbewahren.", "Account created and connected. Store the recovery code safely.")
-                await synchronize(model)
-            } else {
-                self.email = email
-                status = L("Bestätige die E-Mail und melde dich danach an.", "Confirm the email, then sign in.")
-            }
+            let value = try await auth.verifyEmailOTP(email: otpEmail, code: token)
+            try await connect(session: value, recoveryCode: recoveryCode, model: model)
+            otpRequested = false; otpEmail = ""
         } catch { status = error.localizedDescription }
+    }
+
+    func cancelOTP() {
+        guard !busy else { return }
+        otpRequested = false; otpEmail = ""; status = L("Nicht verbunden", "Not connected")
     }
 
     func requestPasswordReset(email: String) async {
@@ -312,47 +425,64 @@ final class BrowserSyncStore: ObservableObject {
     }
 
     func handleAuthURL(_ url: URL, model: BrowserModel) async {
+        guard SupabaseAuthClient.isAuthURL(url) else { return }
+        let recoveryLink = SupabaseAuthClient.isRecoveryURL(url)
+        if recoveryLink {
+            scheduled?.cancel()
+            passwordRecoverySession = nil; needsNewPassword = true
+            status = L("Rücksetzlink wird geprüft …", "Checking reset link …")
+        }
+        model.settingsSection = L("Sync", "Sync"); model.showSettings = true
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        busy = true; defer { busy = false }
         do {
             let (value, recovery) = try await auth.session(fromAuthURL: url)
-            try saveSession(value)
             if recovery {
-                signedIn = false; needsNewPassword = true
+                // A recovery token is only for changing the password. Do not
+                // create a sync key or persist it as an ordinary login session.
+                passwordRecoverySession = value; email = value.email; needsNewPassword = true
                 status = L("Wähle jetzt ein neues Passwort.", "Choose a new password now.")
             } else {
-                try ensureKey(from: "")
+                passwordRecoverySession = nil
+                try saveSession(value); try ensureKey(from: "")
                 signedIn = true; needsNewPassword = false
                 recoveryCode = encodeKey(keyData!)
                 status = L("E-Mail bestätigt. Dein Konto ist verbunden.", "Email confirmed. Your account is connected.")
                 await synchronize(model)
             }
-            model.settingsSection = L("Sync", "Sync"); model.showSettings = true
-            NSApp.activate(ignoringOtherApps: true)
         } catch {
-            status = error.localizedDescription
-            model.settingsSection = L("Sync", "Sync"); model.showSettings = true
+            status = recoveryLink
+                ? L("Der Rücksetzlink ist ungültig oder abgelaufen. Fordere einen neuen Link an.", "The reset link is invalid or expired. Request a new link.")
+                : error.localizedDescription
         }
+    }
+
+    func cancelPasswordRecovery() {
+        guard !busy else { return }
+        passwordRecoverySession = nil; needsNewPassword = false
+        email = session?.email ?? email
+        status = L("Zurücksetzen abgebrochen.", "Password reset cancelled.")
     }
 
     func updatePassword(_ password: String, model: BrowserModel) async {
-        guard password.count >= 8, let session else {
-            status = L("Das neue Passwort muss mindestens 8 Zeichen haben.", "The new password must be at least 8 characters.")
-            return
-        }
+        guard !busy, password.count >= 8, var recovery = passwordRecoverySession else { return }
         busy = true; defer { busy = false }
         do {
-            try await auth.updatePassword(password, accessToken: session.accessToken)
-            try ensureKey(from: "")
-            signedIn = true; needsNewPassword = false
-            if revision == nil { recoveryCode = encodeKey(keyData!) }
-            status = L("Passwort geändert. Dein Konto ist wieder verbunden.", "Password changed. Your account is connected again.")
-            await synchronize(model)
+            if recovery.expiresAt.timeIntervalSinceNow < 60 {
+                recovery = try await auth.refresh(recovery)
+                passwordRecoverySession = recovery
+            }
+            try await auth.updatePassword(password, accessToken: recovery.accessToken)
+            if session?.userID == recovery.userID {
+                BrowserSyncSecrets.remove(account: sessionAccount)
+                session = nil; signedIn = false
+            }
+            passwordRecoverySession = nil; needsNewPassword = false
+            status = L("Passwort geändert. Melde dich mit deinem neuen Passwort an.", "Password changed. Sign in with your new password.")
         } catch { status = error.localizedDescription }
     }
 
-    private func connect(email: String, password: String, recoveryCode: String, model: BrowserModel) async {
-        guard !busy else { return }; busy = true; defer { busy = false }
-        do {
-            let value = try await auth.signIn(email: email, password: password)
+    private func connect(session value: SupabaseAuthSession, recoveryCode: String, model: BrowserModel) async throws {
             try saveSession(value)
             let service = service(for: value)
             let remote = try await service.fetch(profileID: profileID)
@@ -371,7 +501,6 @@ final class BrowserSyncStore: ObservableObject {
             signedIn = true
             if remote == nil { self.recoveryCode = encodeKey(keyData!) }
             await synchronize(model, prefetched: remote)
-        } catch { status = error.localizedDescription }
     }
 
     func restoreAndSync(_ model: BrowserModel) async {
@@ -395,7 +524,7 @@ final class BrowserSyncStore: ObservableObject {
         scheduled?.cancel()
         if let session { await auth.signOut(accessToken: session.accessToken) }
         BrowserSyncSecrets.remove(account: sessionAccount)
-        session = nil; signedIn = false; email = ""; revision = nil; recoveryCode = nil; needsNewPassword = false
+        passwordRecoverySession = nil; session = nil; signedIn = false; email = ""; revision = nil; recoveryCode = nil; needsNewPassword = false; otpRequested = false; otpEmail = ""
         try? FileManager.default.removeItem(at: metadataURL)
         status = L("Abgemeldet. Der Verschlüsselungsschlüssel bleibt sicher auf diesem Mac.", "Signed out. The encryption key remains safely on this Mac.")
     }
@@ -405,8 +534,41 @@ final class BrowserSyncStore: ObservableObject {
         recoveryCode = encodeKey(keyData)
     }
 
+    /// Creates a one-time bootstrap for an iPhone. The QR expires server-side
+    /// after ten minutes; scanning it never transfers this Mac's login token.
+    func createDevicePairingCode() async throws -> DevicePairingCode {
+        guard let session, let keyData, signedIn else {
+            throw YOBROError.message(L("Melde dich zuerst für Sync an.", "Sign in to Sync first."))
+        }
+        let secret = DevicePairingCode.secret()
+        var request = URLRequest(url: SupabaseAuthClient.projectURL.appendingPathComponent("rest/v1/rpc/create_browser_pairing"))
+        request.httpMethod = "POST"
+        request.setValue(SupabaseAuthClient.publishableKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["p_pairing_hash": DevicePairingCode.hash(secret), "p_profile_id": profileID.uuidString])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw YOBROError.message(L("QR-Kopplung konnte nicht erstellt werden.", "Could not create pairing QR."))
+        }
+        return DevicePairingCode(version: 1, profileID: profileID, bootstrapSecret: secret, syncKey: keyData.base64EncodedString())
+    }
+
+    func loadDevices() async {
+        guard let session, signedIn else { devices = []; return }
+        do {
+            var request = URLRequest(url: SupabaseAuthClient.projectURL.appendingPathComponent("rest/v1/rpc/list_browser_devices"))
+            request.httpMethod = "POST"; request.setValue(SupabaseAuthClient.publishableKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["p_profile_id": profileID.uuidString])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw YOBROError.message("Geräte konnten nicht geladen werden.") }
+            devices = try JSONDecoder().decode([PairedBrowserDevice].self, from: data)
+        } catch { status = error.localizedDescription }
+    }
+
     private func synchronize(_ model: BrowserModel, prefetched: RemoteSyncRecord? = nil) async {
-        guard !syncing, var activeSession = session, let keyData else { return }
+        guard !needsNewPassword, !syncing, var activeSession = session, let keyData else { return }
         syncing = true
         let wasBusy = busy
         if !wasBusy { busy = true }
@@ -497,3 +659,5 @@ final class BrowserSyncStore: ObservableObject {
         try JSONEncoder().encode(Metadata(revision: revision)).write(to: metadataURL, options: [.atomic, .completeFileProtection])
     }
 }
+
+#endif

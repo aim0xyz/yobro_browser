@@ -57,6 +57,7 @@ void SpikeWindow::loadSession(const QString &initialUrl) {
                 .pinned = record.value(QStringLiteral("pinned")).toBool(false),
             });
         }
+        updateClosedTabAction();
         const QByteArray geometry = QByteArray::fromBase64(
             root.value(QStringLiteral("geometry")).toString().toLatin1()
         );

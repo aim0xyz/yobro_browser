@@ -1,15 +1,28 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
-// Resolve against the view's effective AppKit appearance, including live system changes.
+// Shared desktop/iOS palette, resolved against the current system appearance.
 enum YOBROTheme {
     static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
+        #if os(macOS)
         Color(nsColor: NSColor(name: NSColor.Name(name)) { appearance in
             let value = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
                            green: CGFloat((value >> 8) & 255) / 255,
                            blue: CGFloat(value & 255) / 255, alpha: 1)
         })
+        #else
+        Color(uiColor: UIColor { traits in
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                           green: CGFloat((value >> 8) & 255) / 255,
+                           blue: CGFloat(value & 255) / 255, alpha: 1)
+        })
+        #endif
     }
     static let text = adaptive("YOBRO.text", light: 0x303B3B, dark: 0xE3E9E0)
     static let accent = adaptive("YOBRO.accent", light: 0x4F6654, dark: 0xADC6A8)
@@ -31,6 +44,7 @@ enum YOBROTheme {
     static let brandOrange = adaptive("YOBRO.brandOrange", light: 0xFF541C, dark: 0xFF6A38)
 }
 
+#if os(macOS)
 let ink = YOBROTheme.text
 let moss = YOBROTheme.accent
 let paper = YOBROTheme.page
@@ -200,3 +214,5 @@ struct YOBROSettingsHeading: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+#endif

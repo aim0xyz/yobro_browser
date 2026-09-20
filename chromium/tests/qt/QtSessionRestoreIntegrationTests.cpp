@@ -108,13 +108,12 @@ std::vector<QTreeWidgetItem *> sidebarTabRows(const yobro::spike::SpikeWindow &w
     std::vector<QTreeWidgetItem *> rows;
     auto *tree = window.findChild<QTreeWidget *>(QStringLiteral("workspaceTree"));
     if (!tree) return rows;
-    for (int top = 0; top < tree->topLevelItemCount(); ++top) {
-        QTreeWidgetItem *space = tree->topLevelItem(top);
-        for (int groupIndex = 0; groupIndex < space->childCount(); ++groupIndex) {
-            QTreeWidgetItem *group = space->child(groupIndex);
-            for (int tabIndex = 0; tabIndex < group->childCount(); ++tabIndex)
-                rows.push_back(group->child(tabIndex));
-        }
+    // The reworked sidebar keeps the groups (pinned, folders, "Deine Tabs")
+    // on the top level and the tab rows directly beneath them.
+    for (int groupIndex = 0; groupIndex < tree->topLevelItemCount(); ++groupIndex) {
+        QTreeWidgetItem *group = tree->topLevelItem(groupIndex);
+        for (int tabIndex = 0; tabIndex < group->childCount(); ++tabIndex)
+            rows.push_back(group->child(tabIndex));
     }
     return rows;
 }
@@ -159,7 +158,7 @@ int main(int argc, char *argv[]) {
             pump(200);
 
             // A note is a tab of its own kind, so it belongs to the session too.
-            auto *noteButton = first.window->findChild<QPushButton *>(QStringLiteral("newNoteButton"));
+            auto *noteButton = first.window->findChild<QPushButton *>(QStringLiteral("sidebarNewNoteButton"));
             check(noteButton != nullptr, "The new-note button is missing.");
             const int tabsBeforeNote = tabs->count();
             noteButton->click();

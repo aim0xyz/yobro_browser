@@ -1,3 +1,5 @@
+#include <QCoreApplication>
+#include <QElapsedTimer>
 #include "engine/qtwebengine/QtBrowserLibrary.hpp"
 #include "engine/qtwebengine/QtBrowserProfile.hpp"
 #include "engine/qtwebengine/QtEventLoop.hpp"
@@ -144,8 +146,8 @@ void checkPanelExists(const SpikeWindow &window) {
     for (const QString &name : {
              QStringLiteral("spaceChatPanel"), QStringLiteral("spaceChatTimeline"),
              QStringLiteral("spaceChatInput"), QStringLiteral("spaceChatSendButton"),
-             QStringLiteral("spaceChatStopButton"), QStringLiteral("spaceChatNewButton"),
-             QStringLiteral("spaceChatConnectionButton"), QStringLiteral("spaceChatProviderPicker"),
+             QStringLiteral("spaceChatStopButton"), QStringLiteral("spaceChatCircleButton"),
+             QStringLiteral("spaceChatProviderPicker"),
              QStringLiteral("spaceChatEndpointField"), QStringLiteral("spaceChatModelPicker"),
              QStringLiteral("spaceChatKeyField"), QStringLiteral("spaceChatSaveButton"),
              QStringLiteral("spaceChatForgetButton"), QStringLiteral("spaceChatStatus"),
@@ -190,6 +192,12 @@ void checkNoteTools(ChatApp &app, FakeTransport &transport) {
     transport.replies.push_back(reply(QStringLiteral("Die Notiz heißt Einkauf.")));
     sendPrompt(window, QStringLiteral("Notiere Milch."));
 
+    // The reworked panel settles the reply and its tool calls on the event
+    // loop, so pump until the note tab appears instead of assuming a
+    // synchronous send.
+    QElapsedTimer noteDeadline; noteDeadline.start();
+    while (tabs->count() != tabsBefore + 1 && noteDeadline.elapsed() < 5000)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
     check(tabs->count() == tabsBefore + 1, "The assistant did not open a note tab.");
     check(tabs->tabText(tabs->count() - 1) == QStringLiteral("Einkauf"),
           "The note tab does not carry the title the assistant gave it.");
@@ -273,7 +281,7 @@ void checkInventory(ChatApp &app) {
     check(sawNote, "The note is missing from the inventory.");
 
     // A private tab must not appear, not even by address.
-    auto *privateButton = window.findChild<QPushButton *>(QStringLiteral("privateTabButton"));
+    auto *privateButton = window.findChild<QPushButton *>(QStringLiteral("sidebarPrivateTabButton"));
     check(privateButton != nullptr, "The private-tab button is missing.");
     const int before = window.inventory().size();
     privateButton->click();
@@ -329,7 +337,7 @@ void checkPersistence(ChatApp &app) {
 void checkNewChat(ChatApp &app) {
     SpikeWindow &window = *app.window;
     check(!timelineTexts(window).isEmpty(), "There is nothing to clear.");
-    window.findChild<QPushButton *>(QStringLiteral("spaceChatNewButton"))->click();
+    window.findChild<QPushButton *>(QStringLiteral("spaceChatCircleButton"))->click();
     check(timelineTexts(window).isEmpty(), "A new chat did not clear the timeline.");
     check(window.assistantStore().entries(window.space()).empty(),
           "A new chat did not clear the stored conversation.");

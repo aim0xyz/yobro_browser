@@ -8,6 +8,7 @@ final class AgentWorkspaceTests: XCTestCase {
         for sidebarOpen in [false, true] {
             let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             let model = BrowserModel(root: home)
+            model.agentEnabled = true
             defer { try? FileManager.default.removeItem(at: home) }
             let original = model.space
             _ = model.newTab(space: "Studio")
@@ -36,7 +37,10 @@ final class AgentWorkspaceTests: XCTestCase {
     }
     @MainActor
     func testAgentWebViewIsDetachedWhileAnotherAppIsActive() {
-        let model = BrowserModel()
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
         let agent = model.newAgentTab()
 
         model.updateAgentWorkspacePresentation(appIsActive: false)
@@ -59,6 +63,7 @@ final class AgentWorkspaceTests: XCTestCase {
             try? FileManager.default.removeItem(at: home)
         }
         let model = BrowserModel()
+        model.agentEnabled = true
         let user = model.newTab()
         _ = try await model.handle(["command": "status"])
         XCTAssertFalse(model.agentWorkspaceVisible)

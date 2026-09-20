@@ -35,6 +35,8 @@ struct CompactSidebar: View {
                     ForEach(model.visibleTabs.filter { !$0.pinned && $0.folderID == nil }) { tab in CompactTabIcon(tab: tab, model: model) }
                     icon("plus", L("Neuer Tab · ⌘T")) { model.requestNewTab() }
                         .contextMenu { Button(L("Neuer privater Tab", "New private tab")) { model.requestPrivateTab() } }
+                        .contentShape(Rectangle())
+                        .onDrop(of: [.plainText], delegate: SidebarBottomDropDelegate(model: model))
                 }
             }.scrollIndicators(.hidden)
             Spacer(minLength: 0)
@@ -49,7 +51,7 @@ struct CompactSidebar: View {
     }
     private func icon(_ symbol: String, _ title: String, active: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).font(.system(size: 17)).frame(width: 42, height: 40).background(active ? moss.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 9)) }
-            .buttonStyle(YOBROButtonStyle()).foregroundStyle(moss).help(title).accessibilityLabel(title)
+            .buttonStyle(YOBROButtonStyle()).foregroundStyle(moss).yobroHelp(title).accessibilityLabel(title)
     }
 }
 
@@ -76,7 +78,7 @@ private struct CompactSpaceSwitcher: View {
             }
         }
         .buttonStyle(YOBROButtonStyle())
-        .help(L("Space wechseln: ", "Switch space: ") + model.space)
+        .yobroHelp(L("Space wechseln: ", "Switch space: ") + model.space)
         .accessibilityLabel(L("Space wechseln: ", "Switch space: ") + model.space)
         .contextMenu { SpaceIconMenu(model: model, space: model.space) }
         .onHover(perform: hover)
@@ -171,7 +173,7 @@ private struct CompactTabIcon: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(YOBROButtonStyle(minimumSize: 28))
-                .help(L("Tab löschen", "Delete tab"))
+                .yobroHelp(L("Tab löschen", "Delete tab"))
                 .accessibilityLabel(L("Tab löschen", "Delete tab"))
             }
         }
@@ -190,7 +192,7 @@ private struct CompactTabIcon: View {
                 : L("Tab löschen", "Delete tab")) { model.closeSidebarTab(tab.id) }
             if model.splitPairs.contains(where: { $0.contains(tab.id) }) { Button(L("Splitview trennen")) { model.separateSplit(tab.id) } }
         }
-        .help(tooltip)
+        .yobroHelp(tooltip, placement: .trailing)
         .accessibilityLabel(tooltip)
     }
 }
@@ -232,7 +234,7 @@ private struct CompactFolderIcon: View {
         .onDrop(of: [.plainText], delegate: FolderHeaderDropDelegate(
             folderID: folder.id, rowHeight: 40, model: model, tabTargeted: $dropTargeted
         ))
-        .help(L("Ordner: ") + folder.name + " · \(count) " + (count == 1 ? "Tab" : "Tabs"))
+        .yobroHelp(L("Ordner: ") + folder.name + " · \(count) " + (count == 1 ? "Tab" : "Tabs"))
         .accessibilityLabel(L("Ordner: ") + folder.name)
         .contextMenu {
             Button(L("Neue Notiz", "New note")) { model.newNote(space: folder.space, folderID: folder.id) }
@@ -250,7 +252,7 @@ private struct CompactFolderIcon: View {
                         model.newNote(space: folder.space, folderID: folder.id)
                     } label: { Image(systemName: "note.text.badge.plus") }
                         .buttonStyle(.plain)
-                        .help(L("Notiz in diesem Ordner erstellen", "Create note in this folder"))
+                        .yobroHelp(L("Notiz in diesem Ordner erstellen", "Create note in this folder"))
                     Text("\(count)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 }.padding(.horizontal, 8).padding(.bottom, 4)
                 if tabs.isEmpty {

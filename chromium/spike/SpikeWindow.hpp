@@ -359,7 +359,10 @@ private:
     QWidget *agentPane_ = nullptr;
     QComboBox *spacePicker_ = nullptr;
     QComboBox *folderPicker_ = nullptr;
+    QPushButton *spaceStripButton_ = nullptr;
+    QPushButton *agentPaneToggle_ = nullptr;
     QCheckBox *libraryAccess_ = nullptr;
+    QPushButton *agentQuickAccess_ = nullptr;
     QLineEdit *address_ = nullptr;
     QLabel *status_ = nullptr;
     QTimer *statusHideTimer_ = nullptr;
@@ -370,6 +373,7 @@ private:
     QPushButton *back_ = nullptr;
     QPushButton *forward_ = nullptr;
     QPushButton *reload_ = nullptr;
+    QPushButton *sidebarToggle_ = nullptr;
     QPushButton *reopenClosedTabButton_ = nullptr;
     QVBoxLayout *agentWebLayout_ = nullptr;
     QPointer<QWebEngineView> displayedAgentView_;

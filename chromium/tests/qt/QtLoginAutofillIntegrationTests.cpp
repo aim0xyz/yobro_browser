@@ -401,7 +401,7 @@ void runChecks(LoginApp &app, const QString &fixtureUrl, const QString &origin) 
         (void)vault.remove(stored.origin, stored.username);
 
     // A private tab gets no credential channel at all.
-    auto *privateButton = app.window->findChild<QPushButton *>(QStringLiteral("privateTabButton"));
+    auto *privateButton = app.window->findChild<QPushButton *>(QStringLiteral("sidebarPrivateTabButton"));
     check(privateButton != nullptr, "The window has no private tab button.");
     QTest::mouseClick(privateButton, Qt::LeftButton);
     QTest::qWait(100);

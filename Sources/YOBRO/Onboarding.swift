@@ -17,6 +17,9 @@ extension BrowserModel {
             try OnboardingProgress.finish(home:home)
             showOnboarding = false
             focusAddress = true
+            if tabs.isEmpty {
+                newTab(url: "")
+            }
         }
         catch { notice = L("Die Einrichtung konnte nicht gespeichert werden: ") + error.localizedDescription }
     }
@@ -33,7 +36,7 @@ struct OnboardingView: View {
                 YOBROMark(size:32)
                 Text(L("Willkommen in YoBro")).font(.system(size:28,design:.serif))
                 Spacer()
-                Text("\(step + 1) / 3").font(.system(size:12,design:.monospaced)).foregroundStyle(.secondary)
+                Text("\(step + 1) / 4").font(.system(size:12,design:.monospaced)).foregroundStyle(.secondary)
             }
             Group {
                 if step == 0 {
@@ -46,6 +49,8 @@ struct OnboardingView: View {
                     }.padding(.top,35)
                 } else if step == 1 {
                     BrowserImportView(model:model, store:importer, onImported: { message in result = message; step = 2 })
+                } else if step == 2 {
+                    AgentConnectionsView(model: model)
                 } else {
                     VStack(alignment:.leading,spacing:20) {
                         Label(L("Dein YoBro ist bereit"),systemImage:"checkmark.circle").font(.system(size:26,design:.serif)).foregroundStyle(moss)
@@ -62,6 +67,10 @@ struct OnboardingView: View {
                 Spacer()
                 if step == 0 { Button(L("Browserdaten übertragen")) { step = 1 }.buttonStyle(.borderedProminent).tint(moss) }
                 if step == 2 {
+                    Button(L("Später verbinden", "Connect later")) { step = 3 }
+                    Button(L("Weiter", "Continue")) { step = 3 }.buttonStyle(.borderedProminent).tint(moss)
+                }
+                if step == 3 {
                     Button(L("Weitere Daten importieren")) { step = 1 }
                     Button(L("Loslegen")) { model.finishOnboarding() }.buttonStyle(.borderedProminent).tint(moss)
                 }

@@ -207,6 +207,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     @Published var findFound: Bool?
     @Published var findError: String?
     @Published private(set) var isSuspended: Bool
+    var lastActiveAt: Date = Date()
     let isPrivate: Bool
     weak var owner: BrowserModel?
     private var observers: [NSKeyValueObservation] = []
@@ -250,7 +251,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         }
         if !useConfigurationDirectly {
             BrowserIdentity.configure(config)
-            owner.adBlocker.attach(to: config.userContentController)
+            // Ad blocking is provided by the bundled uBlock Origin Lite WebExtension.
             owner.webAppearance.install(on: config.userContentController)
             if !isPrivate { owner.extensions.configure(config) }
         }
@@ -258,8 +259,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         super.init()
         logins.tab = self
         if !useConfigurationDirectly && !isPrivate { logins.install(on: config.userContentController) }
-        (webView as? AppearanceWebView)?.appearanceChanged = { [weak self] in
-            guard let self else { return }; self.owner?.webAppearance.update(self.webView)
+        if let appWebView = webView as? AppearanceWebView {
+            appWebView.tab = self
+            appWebView.appearanceChanged = { [weak self] in
+                guard let self else { return }; self.owner?.webAppearance.update(self.webView)
+            }
         }
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -269,7 +273,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             webView.observe(\.title, options: [.new]) { [weak self] view, _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    guard !self.isSuspended, view.url?.scheme != "about" else { return }
+                    guard !self.isSuspended, !self.isExtensionsHub, view.url?.scheme != "about" else { return }
                     self.title = view.title?.isEmpty == false ? view.title! : L("Neue Seite")
                     if #available(macOS 15.4, *) { self.owner?.extensions.runtime.controller.didChangeTabProperties(.title, for: self) }
                     self.owner?.updateVisitTitle(self)
@@ -279,7 +283,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             webView.observe(\.url, options: [.new]) { [weak self] view, _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    guard !self.isSuspended, view.url?.scheme != "about" else { return }
+                    guard !self.isSuspended, !self.isExtensionsHub, view.url?.scheme != "about" else { return }
                     self.url = view.url?.absoluteString ?? ""
                     if #available(macOS 15.4, *) { self.owner?.extensions.runtime.controller.didChangeTabProperties(.URL, for: self) }
                     self.owner?.save()
@@ -287,7 +291,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             },
             webView.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
                 Task { @MainActor in
-                    guard let self else { return }; self.loading = view.isLoading
+                    guard let self, !self.isExtensionsHub else { return }; self.loading = view.isLoading
                     if #available(macOS 15.4, *) { self.owner?.extensions.runtime.controller.didChangeTabProperties(.loading, for: self) }
                 }
             },
@@ -295,10 +299,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 Task { @MainActor in self?.progress = view.estimatedProgress }
             },
             webView.observe(\.canGoBack, options: [.new]) { [weak self] view, _ in
-                Task { @MainActor in self?.canGoBack = view.canGoBack }
+                Task { @MainActor in self?.canGoBack = self?.isExtensionsHub == true ? false : view.canGoBack }
             },
             webView.observe(\.canGoForward, options: [.new]) { [weak self] view, _ in
-                Task { @MainActor in self?.canGoForward = view.canGoForward }
+                Task { @MainActor in self?.canGoForward = self?.isExtensionsHub == true ? false : view.canGoForward }
             }
         ]
         if !deferLoading, !isSuspended { loadPersistedContent() }
@@ -312,10 +316,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     var isNote: Bool { kind == .note }
+    var isExtensionsHub: Bool { ExtensionCatalog.isInternal(url) }
 
     /// A suspended tab's WebView points at a blank document, so its live state is
     /// worthless; keep whatever was captured before it was suspended.
     private var capturedInteractionState: Data? {
+        if isExtensionsHub { return nil }
         if isPrivate { return nil }
         if isSuspended { return restorableInteractionState }
         guard let live = webView.interactionState as? Data else { return restorableInteractionState }
@@ -361,7 +367,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// the back-forward list, scroll position and form contents; without it only
     /// the URL is loaded, which is what YOBRO did for every tab before.
     func loadPersistedContent() {
-        guard !url.isEmpty else { return }
+        guard !url.isEmpty, !isExtensionsHub else { return }
+        webView.customUserAgent = BrowserIdentity.catalogUserAgent(for: URL(string: url))
         if let state = restorableInteractionState {
             restorableInteractionState = nil
             webView.interactionState = state
@@ -374,9 +381,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     /// Releases the live page while retaining the tab's identity, URL and
-    /// favicon in its folder. Selecting it later reloads the retained URL.
-    func suspend() {
-        guard folderID != nil, !isSuspended else { return }
+    /// favicon in its folder (or when hibernated for memory saving).
+    /// Selecting it later reloads the retained URL.
+    func suspend(forced: Bool = false) {
+        guard (folderID != nil || forced), !isSuspended else { return }
         // Capture the live session before navigating away, so resuming restores
         // the history and scroll position instead of a bare URL.
         if let live = webView.interactionState as? Data, live.count <= Self.interactionStateLimit {
@@ -391,9 +399,24 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
 
     func resume() {
         guard isSuspended else { return }
+        lastActiveAt = Date()
         isSuspended = false
         loadPersistedContent()
         owner?.save()
+    }
+
+    /// Checks whether the tab is actively playing audio/video or recording via camera/microphone.
+    func isPlayingMedia() async -> Bool {
+        if #available(macOS 12.0, *) {
+            if webView.cameraCaptureState != .none || webView.microphoneCaptureState != .none {
+                return true
+            }
+        }
+        return await withCheckedContinuation { continuation in
+            webView.requestMediaPlaybackState { state in
+                continuation.resume(returning: state == .playing)
+            }
+        }
     }
 
     /// `stopLoading()` only cancels navigation; HTML media that has already
@@ -456,8 +479,27 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     func navigate(_ input: String) throws {
+        lastActiveAt = Date()
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if let callback = URL(string: text), SupabaseAuthClient.isAuthURL(callback) {
+            if let owner, !owner.agentTabIDs.contains(id) {
+                Task { await owner.sync.handleAuthURL(callback, model: owner) }
+            }
+            return
+        }
+        if ExtensionCatalog.isInternal(text) {
+            webView.stopLoading()
+            url = ExtensionCatalog.internalURL
+            webView.customUserAgent = nil
+            title = L("Erweiterungen · YoBro", "Extensions · YoBro")
+            error = nil; failure = nil; loading = false; favicon = nil; persistedFaviconData = nil
+            restorableInteractionState = nil
+            canGoBack = false; canGoForward = false; showFind = false
+            if webView.url != nil { webView.loadHTMLString("", baseURL: nil) }
+            owner?.save()
+            return
+        }
         let candidate: String
         if text.contains("://") { candidate = text }
         else if !text.contains(" ") && (text.contains(".") || text.hasPrefix("localhost")) {
@@ -471,6 +513,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             throw YOBROError.message(L("Nur gültige HTTP- und HTTPS-Adressen werden unterstützt."))
         }
         error = nil; url = candidate; favicon = nil; persistedFaviconData = nil
+        webView.customUserAgent = BrowserIdentity.catalogUserAgent(for: target)
         webView.load(URLRequest(url: target))
         owner?.save()
     }
@@ -479,6 +522,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// decision stops a load, including our own download and tracking-parameter
     /// paths. Those are not user-visible errors.
     private func record(navigationFailure error: Error) {
+        guard !isExtensionsHub else { return }
         let native = error as NSError
         guard native.code != NSURLErrorCancelled,
               !(native.domain == "WebKitErrorDomain" && native.code == 102),
@@ -500,7 +544,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         // Suspending a folder tab navigates its WebView to an internal blank
         // document. Never let that housekeeping navigation erase the retained
         // page's favicon/title/history.
-        if isSuspended || webView.url?.scheme == "about" { error = nil; return }
+        if isSuspended || isExtensionsHub || webView.url?.scheme == "about" { error = nil; return }
         if #available(macOS 15.4, *) { owner?.extensions.runtime.controller.didChangeTabProperties([.URL, .title, .loading], for: self) }
         let pageURL = webView.url
         Task { [weak self] in
@@ -514,6 +558,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// A crashed web content process leaves a blank view behind. Reload once so
     /// a transient crash heals itself, but stop after that instead of looping.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard !isExtensionsHub else { return }
         guard rendererRestarts < 1, !isSuspended, !url.isEmpty else {
             failure = PageFailure(title: L("Die Seite wurde beendet.", "The page stopped responding."),
                                   detail: L("Der Seiteninhalt ist mehrfach abgestürzt. Lade sie neu oder öffne sie in einem neuen Tab.", "The page content crashed repeatedly. Reload it or open it in a new tab."),
@@ -524,6 +569,26 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         webView.reload()
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let startup = owner?.webStartupTask,
+           ["http", "https"].contains(navigationAction.request.url?.scheme?.lowercased() ?? "") {
+            Task { @MainActor [weak self] in
+                await startup.value
+                guard let self else { decisionHandler(.cancel); return }
+                self.decideNavigationPolicy(navigationAction, decisionHandler: decisionHandler)
+            }
+            return
+        }
+        decideNavigationPolicy(navigationAction, decisionHandler: decisionHandler)
+    }
+
+    private func decideNavigationPolicy(_ navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let callback = navigationAction.request.url, SupabaseAuthClient.isAuthURL(callback) {
+            decisionHandler(.cancel)
+            if navigationAction.targetFrame?.isMainFrame != false, let owner, !owner.agentTabIDs.contains(id) {
+                Task { await owner.sync.handleAuthURL(callback, model: owner) }
+            }
+            return
+        }
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
         // A space proxy or the managed VPN that cannot be applied must stop the
         // request, not quietly hand it to the direct connection.
@@ -537,15 +602,19 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             )
             return
         }
-        if owner?.adBlocker.enabled == true,
-           navigationAction.targetFrame?.isMainFrame == true,
-           navigationAction.request.httpMethod == "GET",
-           let original = navigationAction.request.url {
-            let cleaned = AdBlocker.removingTrackingParameters(from: original)
-            if cleaned != original {
-                decisionHandler(.cancel)
-                webView.load(URLRequest(url: cleaned))
-                return
+        if navigationAction.targetFrame?.isMainFrame == true, ["http", "https"].contains(scheme) {
+            let catalogAgent = BrowserIdentity.catalogUserAgent(for: navigationAction.request.url)
+            if (webView.customUserAgent ?? "") != (catalogAgent ?? "") {
+                webView.customUserAgent = catalogAgent
+                // Reissue only safe reads so the request uses the new identity.
+                // Never replay form submissions or alter subframe navigation.
+                if (navigationAction.request.httpMethod ?? "GET") == "GET" {
+                    decisionHandler(.cancel)
+                    var request = navigationAction.request
+                    request.setValue(nil, forHTTPHeaderField: "User-Agent")
+                    webView.load(request)
+                    return
+                }
             }
         }
         if navigationAction.shouldPerformDownload, ["http", "https", "blob"].contains(scheme) { decisionHandler(.download); return }
@@ -811,13 +880,18 @@ final class BrowserModel: ObservableObject {
     weak var sidebarScrollView: NSScrollView?
     @Published var tabs: [BrowserTab] = []
     @Published var activeID: UUID?
-    @Published var space = L("Persönlich") { didSet { if oldValue != space { chat.cancel(); if !agentTabIDs.isEmpty { pauseAgentWorkspace() } } } }
+    @Published var space = L("Persönlich") { didSet { if oldValue != space { chat.cancel(); if agentSessionActive || !agentTabIDs.isEmpty { pauseAgentWorkspace() } } } }
     @Published var splitID: UUID?
     @Published var agentTabID: UUID?
     @Published var agentTabIDs: Set<UUID> = []
+    @Published var agentSessionActive = false
     @Published var agentWorkspaceVisible = false
     @Published var agentAction: String?
     var agentGeneration = UUID()
+
+    var agentUsageActive: Bool {
+        agentEnabled && isProfileActive && (agentSessionActive || agentAction != nil || chat.running)
+    }
 
     var agentTab: BrowserTab? { tabs.first { $0.id == agentTabID } }
 
@@ -828,7 +902,7 @@ final class BrowserModel: ObservableObject {
         agentWorkspaceVisible = appIsActive && agentTab != nil
     }
 
-    private func presentAgentWorkspaceIfAppropriate() {
+    func presentAgentWorkspaceIfAppropriate() {
         // Model-only tests and pre-window setup have no visible application
         // window. Preserve the normal eager presentation in that case.
         let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.contentView != nil }
@@ -841,6 +915,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func endAgentWorkspace() {
+        agentSessionActive = false
         agentWorkspaceVisible = false
         agentGeneration = UUID()
         let ownedTabs = tabs.filter { agentTabIDs.contains($0.id) }
@@ -865,6 +940,7 @@ final class BrowserModel: ObservableObject {
     func newAgentTab(url: String = "", webViewConfiguration: WKWebViewConfiguration? = nil, useConfigurationDirectly: Bool = false) -> BrowserTab {
         let tab = BrowserTab(saved: StoredTab(id: UUID(), title: L("Agentenseite", "Agent page"), url: "", space: space, pinned: false), owner: self, webViewConfiguration: webViewConfiguration, useConfigurationDirectly: useConfigurationDirectly)
         (tab.webView as? AppearanceWebView)?.agentControlled = true
+        agentSessionActive = true
         agentTabIDs.insert(tab.id)
         tabs.append(tab)
         agentTabID = tab.id
@@ -895,7 +971,16 @@ final class BrowserModel: ObservableObject {
 
     @Published var showAgent = false
     @Published var focusAddress = false
-    @Published var agentEnabled = true { didSet { if !agentEnabled { chat.cancel(); agentGeneration = UUID(); for tab in tabs where agentTabIDs.contains(tab.id) { tab.webView.stopLoading() } } } }
+    @Published var agentEnabled = false {
+        didSet {
+            do {
+                let file = home.appendingPathComponent("agent-access.json")
+                try JSONEncoder().encode(AgentAccessPermission(allowed: agentEnabled)).write(to: file, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            } catch { notice = L("Agent-Freigabe konnte nicht gespeichert werden.", "Could not save agent permission.") }
+            if !agentEnabled { agentSessionActive = false; chat.cancel(); agentGeneration = UUID(); for tab in tabs where agentTabIDs.contains(tab.id) { tab.webView.stopLoading() } }
+        }
+    }
     @Published var bridgeStatus = L("Startet …")
     @Published var events: [AgentEvent] = []
     @Published var notice: String?
@@ -911,13 +996,19 @@ final class BrowserModel: ObservableObject {
     @Published var librarySection: LibrarySection?
     @Published var showPalette = false
     @Published var showMail = false
-    @Published var showSidebar = true
+    @Published var showSidebar = true {
+        didSet {
+            if showSidebar { sidebarOverlayVisible = false }
+        }
+    }
     @Published var sidebarAutoHide = UserDefaults.standard.bool(forKey: "YOBRO.sidebarAutoHide") {
         didSet {
             UserDefaults.standard.set(sidebarAutoHide, forKey: "YOBRO.sidebarAutoHide")
             if sidebarAutoHide { showSidebar = false }
+            else { sidebarOverlayVisible = false }
         }
     }
+    @Published var sidebarOverlayVisible = false
     @Published var showSettings = false
     @Published var showOnboarding = false
     @Published var bookmarks: [BookmarkEntry] = []
@@ -964,8 +1055,8 @@ final class BrowserModel: ObservableObject {
     let managedVPN: ManagedVPNStore
     let webAppearance: WebAppearance
     let pageZoom: PageZoomStore
+    let updates = UpdateService()
     let certificateTrust = CertificateTrustStore()
-    let adBlocker: AdBlocker
     let extensions: ExtensionStore
     let sync: BrowserSyncStore
     let websiteDataStore: WKWebsiteDataStore
@@ -975,9 +1066,17 @@ final class BrowserModel: ObservableObject {
     /// this true through the initial sync so a remote snapshot cannot activate
     /// (and therefore load) a tab before the user chooses one.
     var isColdStartRestore = true
+    var webStartupTask: Task<Void, Never>?
     /// Coalesces history writes; see `saveLibrary`.
     var libraryTask: Task<Void, Never>?
     var syncModifiedAt = Date()
+    @Published var autoSuspendInactiveTabs: Bool = UserDefaults.standard.object(forKey: "YOBRO.autoSuspendInactiveTabs") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(autoSuspendInactiveTabs, forKey: "YOBRO.autoSuspendInactiveTabs")
+        }
+    }
+    private var hibernationTask: Task<Void, Never>?
+    private var memoryPressureSource: (any DispatchSourceMemoryPressure)?
 
     init(profile: LocalBrowserProfile? = nil, root: URL? = nil) {
         let root = root ?? Self.defaultHome
@@ -992,7 +1091,6 @@ final class BrowserModel: ObservableObject {
         managedVPN = ManagedVPNStore(home: home)
         webAppearance = WebAppearance(home: home)
         pageZoom = PageZoomStore(home: home)
-        adBlocker = AdBlocker(home: home)
         if testing { websiteDataStore = .nonPersistent() }
         else if let profile, !profile.isOriginal { websiteDataStore = WKWebsiteDataStore(forIdentifier: profile.id) }
         else { websiteDataStore = .default() }
@@ -1000,7 +1098,8 @@ final class BrowserModel: ObservableObject {
         sync = BrowserSyncStore(home: home, profileID: profile?.id ?? LocalBrowserProfile.originalID)
         showSidebar = !sidebarAutoHide
         profileName = profile?.name ?? L("Privat", "Personal")
-        agentEnabled = original
+        // New installs never grant local programs access to browser sessions implicitly.
+        agentEnabled = AgentAccessPermission.load(home: home).allowed
         var startupProblems: [String] = []
         do { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
         catch { startupProblems.append(error.localizedDescription) }
@@ -1040,14 +1139,77 @@ final class BrowserModel: ObservableObject {
             bridgeLibraryAccess = policy.allowsLibraryAccess
         }
         if !startupProblems.isEmpty { notice = startupProblems.joined(separator: "\n") }
-        Task {
+        webStartupTask = Task {
             // WKWebView locks in its data-store proxy when the first navigation
             // starts, so restore the managed VPN before loading deferred tabs.
             await managedVPN.restore(to: websiteDataStore)
-            await extensions.start(owner: self)
+            webStartupTask = nil
+        }
+        // Extension startup can involve loading a background worker and must
+        // never keep ordinary browsing, restored tabs, or the address search
+        // waiting behind it.
+        Task { await extensions.start(owner: self) }
+        let startup = webStartupTask
+        Task {
+            await startup?.value
             await sync.restoreAndSync(self)
             isColdStartRestore = false
+            if !testing {
+                startTabHibernationMonitoring()
+            }
         }
+    }
+
+    deinit {
+        hibernationTask?.cancel()
+        memoryPressureSource?.cancel()
+    }
+
+    /// Automatically unloads tabs that have been inactive for longer than `timeout`,
+    /// provided they are not active, pinned, loading, playing media, or notes.
+    @discardableResult
+    func suspendInactiveTabs(olderThan timeout: TimeInterval = 30 * 60) async -> [UUID] {
+        guard autoSuspendInactiveTabs else { return [] }
+        let now = Date()
+        var suspendedIDs: [UUID] = []
+        for tab in tabs {
+            guard tab.id != activeID, tab.id != splitID else { continue }
+            guard !agentTabIDs.contains(tab.id) else { continue }
+            guard !tab.isNote, !tab.url.isEmpty, !tab.isSuspended, !tab.loading else { continue }
+            guard now.timeIntervalSince(tab.lastActiveAt) >= timeout else { continue }
+            let playing = await tab.isPlayingMedia()
+            guard !playing else { continue }
+            tab.suspend(forced: true)
+            suspendedIDs.append(tab.id)
+        }
+        return suspendedIDs
+    }
+
+    func startTabHibernationMonitoring() {
+        guard hibernationTask == nil else { return }
+        hibernationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
+                guard let self else { break }
+                await self.suspendInactiveTabs()
+            }
+        }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.suspendInactiveTabs(olderThan: 5 * 60)
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
+    }
+
+    func stopTabHibernationMonitoring() {
+        hibernationTask?.cancel()
+        hibernationTask = nil
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
     }
 
 
@@ -1131,24 +1293,27 @@ final class BrowserModel: ObservableObject {
     @discardableResult
     func newTab(url: String = "", space targetSpace: String? = nil, isPrivate: Bool = false, webViewConfiguration: WKWebViewConfiguration? = nil, useConfigurationDirectly: Bool = false) -> BrowserTab {
         showMail = false
-        let targetSpace = targetSpace ?? space
-        let previous = active
-        let tab = BrowserTab(saved: StoredTab(id: UUID(), title: isPrivate ? L("Privater Tab", "Private tab") : L("Neue Seite"), url: "", space: targetSpace, pinned: false, isPrivate: isPrivate), owner: self, webViewConfiguration: webViewConfiguration, useConfigurationDirectly: useConfigurationDirectly)
+        if let targetSpace, targetSpace != space {
+            switchSpace(targetSpace)
+        }
+        let tab = BrowserTab(saved: StoredTab(id: UUID(), title: isPrivate ? L("Privater Tab", "Private tab") : L("Neue Seite"), url: "", space: targetSpace ?? space, pinned: false, isPrivate: isPrivate), owner: self, webViewConfiguration: webViewConfiguration, useConfigurationDirectly: useConfigurationDirectly)
         tabs.append(tab)
         if #available(macOS 15.4, *) { extensions.runtime.controller.didOpenTab(tab) }
-        space = targetSpace; activeID = tab.id; splitID = nil
-        if #available(macOS 15.4, *) { extensions.runtime.controller.didActivateTab(tab, previousActiveTab: previous) }
+        select(tab.id)
         if !url.isEmpty { do { try tab.navigate(url) } catch { notice = error.localizedDescription } }
         save(); return tab
     }
     func select(_ id: UUID) {
         showMail = false
         guard let tab = tabs.first(where: { $0.id == id }), !agentTabIDs.contains(id) else { return }
-        if !tab.isNote { tab.resume() }
+        tab.lastActiveAt = Date()
         if space != tab.space { splitID = nil }
         splitID = splitPairs.first(where: { $0.contains(id) })?.other(id)
         for pane in tabs where pane.id == id || pane.id == splitID {
-            if !pane.isNote, pane.webView.url == nil { pane.loadPersistedContent() }
+            if !pane.isNote {
+                pane.resume()
+                if pane.webView.url == nil { pane.loadPersistedContent() }
+            }
         }
         let previous = active
         activeID = id; space = tab.space; save()
@@ -1166,12 +1331,7 @@ final class BrowserModel: ObservableObject {
         if managedVPN.isActive { managedVPN.reapply(to: websiteDataStore) }
         else { proxies.apply(to: websiteDataStore, for: space) }
     }
-    func setAdBlockingEnabled(_ enabled: Bool) {
-        adBlocker.setEnabled(enabled, webViews: tabs.map(\.webView))
-    }
-    func setStrictAdBlockingEnabled(_ enabled: Bool) {
-        adBlocker.setStrictProtection(enabled, webViews: tabs.map(\.webView))
-    }
+
     func presentWebPageDialog(tabID: UUID, title: String, message: String, kind: WebPageDialog.Kind, defaultText: String = "", destructive: Bool = false, completion: @escaping (WebPageDialog.Response) -> Void) {
         if let pending = webPageDialog { pending.completion(.dismissed) }
         webPageDialog = WebPageDialog(tabID: tabID, title: title, message: message, kind: kind, defaultText: defaultText, destructive: destructive, completion: completion)
@@ -1318,7 +1478,8 @@ final class BrowserModel: ObservableObject {
             persistSession()
         }
     }
-    func persistSession(scheduleSync: Bool = true, updateTimestamp: Bool = true) {
+    @discardableResult
+    func persistSession(scheduleSync: Bool = true, updateTimestamp: Bool = true) -> Bool {
         saveTask?.cancel()
         do {
             let userTabs = tabs.filter { !agentTabIDs.contains($0.id) && !$0.isPrivate }
@@ -1326,7 +1487,8 @@ final class BrowserModel: ObservableObject {
             try data.write(to: home.appendingPathComponent("session.json"), options: .atomic)
             if updateTimestamp { syncModifiedAt = Date() }
             if scheduleSync { sync.schedule(self) }
-        } catch { notice = "Sitzung konnte nicht gespeichert werden: \(error.localizedDescription)" }
+            return true
+        } catch { notice = "Sitzung konnte nicht gespeichert werden: \(error.localizedDescription)"; return false }
     }
     func markSyncChanged() {
         syncModifiedAt = Date()

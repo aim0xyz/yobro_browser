@@ -110,7 +110,7 @@ struct SpaceChatPanel: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).frame(width: 30, height: 30)
                 .background(YOBROTheme.surface.opacity(0.42), in: Circle())
-        }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+        }.buttonStyle(.plain).yobroHelp(help).accessibilityLabel(help)
     }
 
     private var connectionPrompt: some View {
@@ -219,7 +219,7 @@ struct SpaceChatPanel: View {
                             .frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain)
-                    .help(L("API-Schlüssel kopieren", "Copy API key"))
+                    .yobroHelp(L("API-Schlüssel kopieren", "Copy API key"))
                     .accessibilityLabel(L("API-Schlüssel kopieren", "Copy API key"))
                 }
                 Button {
@@ -232,7 +232,7 @@ struct SpaceChatPanel: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(unlockingAPIKey || chat.apiKey.isEmpty)
-                .help(showAPIKey ? L("API-Schlüssel verbergen", "Hide API key") : L("Mit macOS entsperren", "Unlock with macOS"))
+                .yobroHelp(showAPIKey ? L("API-Schlüssel verbergen", "Hide API key") : L("Mit macOS entsperren", "Unlock with macOS"))
                 .accessibilityLabel(showAPIKey ? L("API-Schlüssel verbergen", "Hide API key") : L("API-Schlüssel sicher entsperren", "Securely unlock API key"))
             }
             .padding(.horizontal, 10)
@@ -394,10 +394,10 @@ struct SpaceChatPanel: View {
                     Text(L("Mail-Kontext angehängt", "Email context attached")).font(.system(size: 10, weight: .medium))
                     Spacer()
                     Button { chat.contexts[browser.space] = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).help(L("Kontext entfernen", "Remove context"))
+                        .buttonStyle(.plain).yobroHelp(L("Kontext entfernen", "Remove context"))
                 }
                 .padding(.horizontal, 9).frame(height: 27).background(moss.opacity(0.09), in: Capsule())
-                .help(String(context.prefix(300)))
+                .yobroHelp(String(context.prefix(300)))
             }
             messageField
             HStack {
@@ -414,7 +414,7 @@ struct SpaceChatPanel: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!browser.agentEnabled || !configured || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .help(L("Senden", "Send"))
+                    .yobroHelp(L("Senden", "Send"))
                 }
             }
         }
@@ -423,15 +423,19 @@ struct SpaceChatPanel: View {
     }
 
     private var messageField: some View {
-        TextField(L("Nachricht an diesen Space …", "Message this Space …"), text: draft, axis: .vertical)
-            .lineLimit(2...5)
-            .textFieldStyle(.plain)
-            .font(.system(size: 12))
-            .onKeyPress(keys: [.return], phases: .down) { press in
-                if press.modifiers.contains(.shift) { return .ignored }
-                chat.send(browser: browser)
-                return .handled
+        ZStack(alignment: .topLeading) {
+            if draft.wrappedValue.isEmpty {
+                Text(L("Nachricht an diesen Space …", "Message this Space …"))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .padding(.leading, 5).padding(.top, 4)
+                    .allowsHitTesting(false)
             }
+            ChatMessageInput(text: draft) {
+                guard browser.agentEnabled, configured, !chat.running else { return }
+                chat.send(browser: browser)
+            }
+        }
+        .yobroHelp(L("Enter: senden · Shift+Enter: neue Zeile", "Enter: send · Shift+Enter: new line"))
     }
 
     private var footer: some View {
@@ -618,7 +622,7 @@ private struct ChatEntryBubble: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help(copied ? L("Kopiert", "Copied") : L("Antwort kopieren", "Copy response"))
+                        .yobroHelp(copied ? L("Kopiert", "Copied") : L("Antwort kopieren", "Copy response"))
                         .accessibilityLabel(copied ? L("Kopiert", "Copied") : L("Antwort kopieren", "Copy response"))
                         Spacer()
                     }

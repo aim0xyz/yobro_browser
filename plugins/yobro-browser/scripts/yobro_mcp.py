@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import os
 from pathlib import Path
 import socket
@@ -73,6 +74,12 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     },
     {
+        "name": "press_key",
+        "description": "Dispatch a keyboard event to an element from the latest read_page. Enter can submit an input's form unless the page cancels it. Other keys invoke page handlers; native typing and Tab traversal are not simulated. Read again to verify the result.",
+        "inputSchema": schema({"ref": {"type": "string"}, "document": {"type": "string"}, "key": {"type": "string", "enum": ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "Backspace", "Delete", " "]}, "tab": TAB}, ["ref", "document", "key"]),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
+    },
+    {
         "name": "scroll",
         "description": "Scroll the current page vertically. Positive amounts scroll down and negative amounts scroll up.",
         "inputSchema": schema({"amount": {"type": "integer", "minimum": -5000, "maximum": 5000, "default": 600}, "tab": TAB}),
@@ -122,7 +129,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "end_session",
-        "description": "End the YOBRO agent session and return its tabs to the normal tab list without disabling future access.",
+        "description": "End the YOBRO agent session and close its temporary tabs without disabling future access.",
         "inputSchema": schema(),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
@@ -157,11 +164,36 @@ def yobro_request(payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "ok": False,
             "error": str(error),
-            "hint": "Start YOBRO and enable Agent Access. The default socket is " + str(path),
+            "hint": (
+                "Local socket access was denied by the OS or sandbox. Check tool permissions; this does not mean YOBRO is stopped. Socket: " + str(path)
+                if isinstance(error, OSError) and error.errno in (errno.EPERM, errno.EACCES)
+                else "Check that YOBRO is running and reachable at " + str(path)
+            ),
         }
 
 
 def tool_payload(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    tool = next((tool for tool in TOOLS if tool["name"] == name), None)
+    if tool is None:
+        raise ValueError(f"Unknown tool: {name}")
+    spec = tool["inputSchema"]
+    for key in spec.get("required", []):
+        if key not in arguments:
+            raise ValueError(f"Missing required argument: {key}")
+    for key, value in arguments.items():
+        rule = spec["properties"].get(key)
+        if rule is None:
+            raise ValueError(f"Unknown argument: {key}")
+        kind = rule["type"]
+        valid = (kind == "string" and isinstance(value, str) or
+                 kind == "boolean" and isinstance(value, bool) or
+                 kind == "integer" and type(value) is int)
+        if not valid:
+            raise ValueError(f"{key} must be {kind}")
+        if "enum" in rule and value not in rule["enum"]:
+            raise ValueError(f"Unsupported {key}: {value}")
+        if "minimum" in rule and value < rule["minimum"] or "maximum" in rule and value > rule["maximum"]:
+            raise ValueError(f"{key} is outside the supported range")
     mappings: dict[str, str] = {
         "status": "status",
         "tabs": "tabs",
@@ -170,6 +202,7 @@ def tool_payload(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "read_page": "read",
         "click": "click",
         "fill": "fill",
+        "press_key": "press",
         "scroll": "scroll",
         "find_on_page": "find",
         "history": "history",

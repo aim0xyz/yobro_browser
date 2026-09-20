@@ -96,8 +96,18 @@ extension BrowserModel {
         splitPairs.removeAll { $0.contains(dragged) || $0.contains(target) }
         splitPairs.append(StoredSplit(first: target, second: dragged))
         second.folderID = first.folderID
+        if !first.isNote { first.resume() }
+        if !second.isNote { second.resume() }
         select(target); persistSession(); return true
     }
+    /// Change command targeting while keeping the split's left/right order.
+    func activateSplitPane(_ id: UUID) {
+        guard id != activeID, !showMail, !agentTabIDs.contains(id),
+              let activeID, let pair = splitPairs.first(where: { $0.contains(activeID) }),
+              pair.contains(id) else { return }
+        select(id)
+    }
+
     func separateSplit(_ id: UUID? = nil) {
         let target = id ?? activeID
         if let target { splitPairs.removeAll { $0.contains(target) } }
@@ -132,7 +142,7 @@ struct SpaceStrip: View {
                     .background(YOBROTheme.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(YOBROButtonStyle(minimumSize: 34))
-                .help(L("Space wechseln: ", "Switch space: ") + model.space)
+                .yobroHelp(L("Space wechseln: ", "Switch space: ") + model.space)
                 .onHover(perform: hoverSpacePicker)
                 .popover(isPresented: $presented, arrowEdge: .leading) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -175,7 +185,7 @@ struct SpaceStrip: View {
                     Button(L("Proxy / VPN einrichten …")) { editingProxySpace = model.space }
                     Divider()
                     Button(L("Neuer Ordner …")) { folderName = ""; addingFolder = true }
-                } label: { Image(systemName: "plus").frame(width: 24, height: 34) }.menuStyle(.borderlessButton).fixedSize().help(L("Spaces und Ordner verwalten"))
+                } label: { Image(systemName: "plus").frame(width: 24, height: 34) }.menuStyle(.borderlessButton).fixedSize().yobroHelp(L("Spaces und Ordner verwalten"))
             }.padding(3).background(ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
         }
         .popover(isPresented: editorPresented, arrowEdge: .leading) {
@@ -320,7 +330,7 @@ struct SpaceFolderRow: View {
                                 model.newNote(space: folder.space, folderID: folder.id)
                             } label: { Image(systemName: "note.text.badge.plus") }
                                 .buttonStyle(.plain)
-                                .help(L("Notiz in diesem Ordner erstellen", "Create note in this folder"))
+                                .yobroHelp(L("Notiz in diesem Ordner erstellen", "Create note in this folder"))
                             Text("\(tabs.count)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                         }.padding(.horizontal, 8).padding(.bottom, 4)
                         if tabs.isEmpty {
@@ -483,11 +493,13 @@ struct FolderHeaderDropDelegate: DropDelegate {
         if model.folderDropFeedback?.targetID == folderID { model.folderDropFeedback = nil }
     }
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard validateDrop(info: info) else { tabTargeted = false; return DropProposal(operation: .forbidden) }
         model.autoScrollSidebarDuringDrag()
         updateFeedback(info)
         return DropProposal(operation: .move)
     }
     func performDrop(info: DropInfo) -> Bool {
+        guard validateDrop(info: info) else { return false }
         tabTargeted = false
         let sessionID = model.sidebarDragSessionID
         if let sourceID = model.draggingFolderID {

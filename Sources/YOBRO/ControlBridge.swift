@@ -100,23 +100,22 @@ extension BrowserModel {
         if let agentTab { return agentTab }
         return newAgentTab()
     }
-    private func tabInfo(_ tab: BrowserTab) -> [String: Any] {
+    func tabInfo(_ tab: BrowserTab) -> [String: Any] {
         ["id": tab.id.uuidString.lowercased(), "title": tab.title, "url": tab.url, "space": tab.space,
          "owner": agentTabIDs.contains(tab.id) ? "agent" : "user", "agentActive": tab.id == agentTabID, "pinned": tab.pinned, "active": tab.id == activeID, "loading": tab.webView.isLoading,
          "error": tab.error as Any? ?? NSNull()]
     }
-    private func waitForLoad(_ tab: BrowserTab) async throws {
-        let generation = agentGeneration
+    func waitForLoad(_ tab: BrowserTab) async throws {
         let deadline = Date().addingTimeInterval(20)
         try await Task.sleep(nanoseconds: 150_000_000)
         while tab.webView.isLoading && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
-        guard agentEnabled, isProfileActive, generation == agentGeneration, agentTabIDs.contains(tab.id) else {
+        guard agentEnabled, isProfileActive else {
             throw YOBROError.message("Agent operation was paused.")
         }
         if tab.webView.isLoading { throw YOBROError.message("Seite lädt noch. Später erneut mit read prüfen.") }
         if let error = tab.error { throw YOBROError.message(error) }
     }
-    private func evaluate(_ script: String, tab: BrowserTab) async throws -> Any {
+    func evaluate(_ script: String, tab: BrowserTab) async throws -> Any {
         try await withCheckedThrowingContinuation { continuation in
             tab.webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
                 switch result {
@@ -128,23 +127,63 @@ extension BrowserModel {
             }
         }
     }
-    private func prepare(_ tab: BrowserTab) async throws {
+    func prepare(_ tab: BrowserTab) async throws {
         guard !tab.url.isEmpty else { throw YOBROError.message("Dieser Tab zeigt die Startseite. Zuerst eine URL öffnen.") }
         guard let resource = Bundle.main.url(forResource: "AgentBridge", withExtension: "js")
             ?? Bundle.module.url(forResource: "AgentBridge", withExtension: "js") else { throw YOBROError.message("AgentBridge.js fehlt.") }
         _ = try await evaluate(String(contentsOf: resource), tab: tab)
     }
+    func readTab(_ tab: BrowserTab) async throws -> [String: Any] {
+        try await waitForLoad(tab)
+        try await prepare(tab)
+        let value = try await evaluate("globalThis.__yobro.snapshot()", tab: tab)
+        record("read", tab.webView.url?.host ?? "Seite gelesen", in: tab.space)
+        return ["tab": tabInfo(tab), "page": value]
+    }
+    func actOnTab(_ tab: BrowserTab, action: String, ref: String, document: String, value: String? = nil, key: String? = nil) async throws -> [String: Any] {
+        try await prepare(tab)
+        guard agentEnabled, isProfileActive else { throw YOBROError.message("Agent operation was paused.") }
+        let args: [String: Any] = [
+            "action": action,
+            "ref": ref,
+            "document": document,
+            "value": value ?? "",
+            "key": key ?? "Enter"
+        ]
+        let json = String(data: try JSONSerialization.data(withJSONObject: args), encoding: .utf8)!
+        let result = try await evaluate("globalThis.__yobro.act(\(json))", tab: tab)
+        record(action, "\(ref) · \(tab.webView.url?.host ?? "Seite")", in: tab.space)
+        return ["tab": tabInfo(tab), "action": result, "next": "Read again to verify the outcome; pages may update asynchronously."]
+    }
+    func scrollTab(_ tab: BrowserTab, amount: Int) async throws -> [String: Any] {
+        let clamped = min(5000, max(-5000, amount))
+        _ = try await evaluate("window.scrollBy(0, \(clamped)); true", tab: tab)
+        record("scroll", tab.webView.url?.host ?? tab.title, in: tab.space)
+        return tabInfo(tab)
+    }
+    func navigateTab(_ tab: BrowserTab, url: URL) async throws -> [String: Any] {
+        if agentTabIDs.contains(tab.id) {
+            agentTabID = tab.id
+            presentAgentWorkspaceIfAppropriate()
+        }
+        try tab.navigate(url.absoluteString)
+        try await waitForLoad(tab)
+        record("open", tab.webView.url?.host ?? tab.title, in: tab.space)
+        return tabInfo(tab)
+    }
     func handle(_ request: [String: Any]) async throws -> [String: Any] {
         guard isProfileActive else { throw YOBROError.message(L("Dieses Profil ist nicht aktiv. Wechsle im Browser zu diesem Profil.", "This profile is inactive. Switch to it in the browser.")) }
         let command = request["command"] as? String ?? "status"
         if command == "status" {
-            return ["browser": "YoBro", "version": "0.6.3", "engine": "WebKit", "protocol": 2, "enabled": agentEnabled, "agentPaneVisible": agentWorkspaceVisible, "agentAction": agentAction as Any? ?? NSNull(),
+            var blocker: [String: Any] = [:]
+            if #available(macOS 15.4, *) { blocker = extensions.runtime.blockerReadinessSummary }
+            return ["browser": "YoBro", "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development", "engine": "WebKit", "blocker": blocker, "protocol": 2, "enabled": agentEnabled, "agentPaneVisible": agentWorkspaceVisible, "agentSessionActive": agentSessionActive, "agentUsageActive": agentUsageActive, "agentAction": agentAction as Any? ?? NSNull(),
                     "socket": controlSocketURL.path, "profile": profileName,
                     "libraryAccess": bridgeLibraryAccess,
-                    "commands": ["status", "tabs", "open", "new", "focus", "close", "read", "click", "fill", "scroll", "back", "forward", "reload", "pin", "split", "find", "history", "downloads", "download", "cancel-download", "duplicate", "end"]]
+                    "commands": ["status", "tabs", "open", "new", "focus", "close", "read", "click", "fill", "press", "scroll", "back", "forward", "reload", "pin", "split", "find", "history", "downloads", "download", "cancel-download", "duplicate", "end"]]
         }
         guard agentEnabled else { throw YOBROError.message("Agentenzugriff ist im Browser pausiert.") }
-        if command == "tabs" { return ["tabs": tabs.map(tabInfo), "space": space] }
+        if command == "tabs" { agentSessionActive = true; return ["tabs": tabs.map(tabInfo), "space": space] }
         if command == "end" {
             endAgentWorkspace()
             return ["ended": true]
@@ -153,6 +192,7 @@ extension BrowserModel {
         if ["space", "panel", "restore", "move"].contains(command) {
             throw YOBROError.message("This command changes the user workspace and is unavailable in agent mode.")
         }
+        agentSessionActive = true
         agentAction = command
         defer { agentAction = nil }
         let generation = agentGeneration
@@ -223,32 +263,24 @@ extension BrowserModel {
         case "focus": agentTabID = tab.id
         case "close": closeTab(tab.id)
         case "open":
-            guard let url = request["url"] as? String else { throw YOBROError.message("URL fehlt.") }
-            try tab.navigate(url); try await waitForLoad(tab)
+            guard let rawURL = request["url"] as? String, let url = URL(string: rawURL) else { throw YOBROError.message("URL fehlt.") }
+            return try await navigateTab(tab, url: url)
         case "back": tab.webView.goBack(); try await waitForLoad(tab)
         case "forward": tab.webView.goForward(); try await waitForLoad(tab)
         case "reload": tab.error = nil; tab.webView.reload(); try await waitForLoad(tab)
         case "pin": tab.pinned.toggle(); save()
         case "read":
-            try await waitForLoad(tab); try await prepare(tab)
-            let value = try await evaluate("globalThis.__yobro.snapshot()", tab: tab)
-            record(command, tab.webView.url?.host ?? "Seite gelesen", in: tab.space)
-            return ["tab": tabInfo(tab), "page": value]
-        case "click", "fill":
-            guard let reference = request["ref"] as? String, let document = request["document"] as? String else {
-                throw YOBROError.message("ref und document aus einem aktuellen read sind erforderlich.")
+            return try await readTab(tab)
+        case "click", "fill", "press":
+            guard let reference = request["ref"] as? String else {
+                throw YOBROError.message("ref aus einem aktuellen read ist erforderlich.")
             }
+            let document = request["document"] as? String ?? ""
             if command == "fill" && request["value"] as? String == nil { throw YOBROError.message("Wert fehlt.") }
-            try await prepare(tab)
-            guard agentEnabled, isProfileActive, generation == agentGeneration, agentTabIDs.contains(tab.id) else { throw YOBROError.message("Agent operation was paused.") }
-            let args: [String: Any] = ["action": command, "ref": reference, "document": document, "value": request["value"] as? String ?? ""]
-            let json = String(data: try JSONSerialization.data(withJSONObject: args), encoding: .utf8)!
-            let result = try await evaluate("globalThis.__yobro.act(\(json))", tab: tab)
-            record(command, "\(reference) · \(tab.webView.url?.host ?? "Seite")")
-            return ["tab": tabInfo(tab), "action": result, "next": "Read again to verify the outcome; pages may update asynchronously."]
+            guard agentTabIDs.contains(tab.id), generation == agentGeneration else { throw YOBROError.message("Agent operation was paused.") }
+            return try await actOnTab(tab, action: command, ref: reference, document: document, value: request["value"] as? String, key: request["key"] as? String)
         case "scroll":
-            let amount = min(5000, max(-5000, request["amount"] as? Int ?? 600))
-            _ = try await evaluate("window.scrollBy(0, \(amount)); true", tab: tab)
+            return try await scrollTab(tab, amount: request["amount"] as? Int ?? 600)
         default: throw YOBROError.message("Unbekannter Befehl: \(command)")
         }
         record(command, tab.webView.url?.host ?? tab.title, in: tab.space)

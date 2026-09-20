@@ -1,0 +1,55 @@
+name: Release YoBro
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag, for example v0.6.9"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      # The feed stays stable while GitHub points its `latest` URL at the
+      # newest release. This lets all existing app versions use one endpoint.
+      YOBRO_UPDATE_FEED_URL: https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.YOBRO_DEVELOPER_ID_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.YOBRO_DEVELOPER_ID_PASSWORD }}
+        run: |
+          echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s build.keychain login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          rm certificate.p12
+      - name: Build signed distributable
+        env:
+          # Add these as GitHub Actions secrets before publishing the first
+          # customer build. Do not put certificates or private update keys in git.
+          YOBRO_SIGN_IDENTITY: ${{ secrets.YOBRO_SIGN_IDENTITY }}
+        run: scripts/build.sh
+      - name: Create disk image
+        run: scripts/build-dmg.sh
+      - name: Sign update feed
+        env:
+          YOBRO_SPARKLE_PRIVATE_KEY: ${{ secrets.YOBRO_SPARKLE_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$YOBRO_SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}" \
+            --link "https://github.com/${{ github.repository }}" \
+            -o dist/appcast.xml dist
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" dist/*.dmg dist/appcast.xml --draft --title "YoBro ${{ inputs.tag }}"

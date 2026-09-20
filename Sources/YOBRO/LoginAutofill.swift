@@ -164,7 +164,7 @@ struct LoginAutofillButton: View {
             showSuggestions()
         } label: { Image(systemName: "key").font(.system(size: 13)).frame(width: 28, height: 32) }
         .buttonStyle(YOBROButtonStyle(minimumSize: 28))
-        .help(L("Gespeicherte Logins ausfüllen", "Fill saved logins"))
+        .yobroHelp(L("Gespeicherte Logins ausfüllen", "Fill saved logins"))
         .accessibilityLabel(L("Gespeicherte Logins ausfüllen", "Fill saved logins"))
         .popover(isPresented: $presented, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 12) {

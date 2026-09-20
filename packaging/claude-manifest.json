@@ -1,0 +1,19 @@
+{
+  "manifest_version": "0.3",
+  "name": "yobro-browser",
+  "display_name": "YOBRO Browser",
+  "version": "0.2.0",
+  "description": "Use your local YOBRO browser. Choose a profile in YOBRO Settings → Agents before connecting.",
+  "long_description": "Works only with the browser profile you explicitly connect in YOBRO. The extension contains no browser profile, passwords, cookies, VPN keys or account credentials. Page content requested by Claude is returned to Claude for processing. Pause access in YOBRO at any time.",
+  "author": { "name": "YOBRO" },
+  "server": {
+    "type": "binary",
+    "entry_point": "bin/yobro-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/bin/yobro-mcp",
+      "args": ["--connection", "claude"]
+    }
+  },
+  "tools_generated": true,
+  "compatibility": { "platforms": ["darwin"] }
+}

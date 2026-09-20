@@ -1,0 +1,506 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0B4C28DDDC27E78F0E32FB16 /* MobileState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7824F2FE6B58E987BDC5E74 /* MobileState.swift */; };
+		243219D2CA191A73A95DB24F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 78C808BAB71109BAC83FDD82 /* Assets.xcassets */; };
+		2756C58800C2A762020D3295 /* uBlockOriginLite-NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = C028CBE3A4A197B289B23734 /* uBlockOriginLite-NOTICE.txt */; };
+		3A63FEF34E528675668FDCBF /* MobileSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6245FAA24AEBD256707D1F5C /* MobileSync.swift */; };
+		43F5537B8155D64458128A69 /* YOBROMark.png in Resources */ = {isa = PBXBuildFile; fileRef = 4DDD13253425C249A0FE2EA5 /* YOBROMark.png */; };
+		5446E4079F3593F24EDE4469 /* SupabaseAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECCB1E23A33A130E942813E9 /* SupabaseAuth.swift */; };
+		6B4F6C4715E5D28FAE16A620 /* MobileDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 389B9E992EE22CC64FC25E62 /* MobileDownloads.swift */; };
+		7A303D600967EA0C618DC6B1 /* MobileExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB382C21424F3C322284D991 /* MobileExtensions.swift */; };
+		8979ED510D516DAE4D1EBDC9 /* DarkReader-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = CEBAF68C9BF23E239DEB179E /* DarkReader-LICENSE.txt */; };
+		935F6530A3DCE8DD635356B9 /* MobileProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DABF8B569D1F36190381762E /* MobileProtection.swift */; };
+		A0955EF2D9CE85FFEBB7A89F /* uBlockOriginLite.safari.zip in Resources */ = {isa = PBXBuildFile; fileRef = 551AA7050EA1FE69127345A3 /* uBlockOriginLite.safari.zip */; };
+		B86EE8A7914044D5CEDB2067 /* YoBroMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7201695AECB61F64ACD3F3F /* YoBroMobileApp.swift */; };
+		BD01F53604AC4BACF96203C1 /* DarkReader.js in Resources */ = {isa = PBXBuildFile; fileRef = 8A3611B190C3643BE331BB43 /* DarkReader.js */; };
+		D1B3F247E8D65A295A62F88F /* PersistedState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9578CC390FBF8C36F58D9A4B /* PersistedState.swift */; };
+		E17145F9947B7009DDC5828B /* MobileTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52DDAADC7EA87DD7F30856F0 /* MobileTheme.swift */; };
+		E2B1566012505F3E8708828B /* MobileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B09BA7A43FC8FA7C9CC4065A /* MobileTests.swift */; };
+		F296551E33F13012EAB72C2A /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85A5DC27EB5089769FB8D5EE /* Theme.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		55FB5FF4A887B6F7528B335E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5BDF8C0EF6D4468B76E49A92 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C46002B1F78B72ABC4890CF7;
+			remoteInfo = YoBroMobile;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		389B9E992EE22CC64FC25E62 /* MobileDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileDownloads.swift; sourceTree = "<group>"; };
+		4DDD13253425C249A0FE2EA5 /* YOBROMark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = YOBROMark.png; sourceTree = "<group>"; };
+		52DDAADC7EA87DD7F30856F0 /* MobileTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTheme.swift; sourceTree = "<group>"; };
+		551AA7050EA1FE69127345A3 /* uBlockOriginLite.safari.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = uBlockOriginLite.safari.zip; sourceTree = "<group>"; };
+		6245FAA24AEBD256707D1F5C /* MobileSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSync.swift; sourceTree = "<group>"; };
+		78C808BAB71109BAC83FDD82 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		840977CFF5E0EE8E116BB242 /* YoBroMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = YoBroMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		85A5DC27EB5089769FB8D5EE /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		8A3611B190C3643BE331BB43 /* DarkReader.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = DarkReader.js; sourceTree = "<group>"; };
+		8C96B622761502F14B6E2D6D /* YoBroMobile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = YoBroMobile.entitlements; sourceTree = "<group>"; };
+		93738CCB4C19958B1F6E450D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9578CC390FBF8C36F58D9A4B /* PersistedState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedState.swift; sourceTree = "<group>"; };
+		B09BA7A43FC8FA7C9CC4065A /* MobileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTests.swift; sourceTree = "<group>"; };
+		BB382C21424F3C322284D991 /* MobileExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileExtensions.swift; sourceTree = "<group>"; };
+		C028CBE3A4A197B289B23734 /* uBlockOriginLite-NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "uBlockOriginLite-NOTICE.txt"; sourceTree = "<group>"; };
+		CEBAF68C9BF23E239DEB179E /* DarkReader-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "DarkReader-LICENSE.txt"; sourceTree = "<group>"; };
+		D7824F2FE6B58E987BDC5E74 /* MobileState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileState.swift; sourceTree = "<group>"; };
+		DABF8B569D1F36190381762E /* MobileProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileProtection.swift; sourceTree = "<group>"; };
+		ECCB1E23A33A130E942813E9 /* SupabaseAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseAuth.swift; sourceTree = "<group>"; };
+		F7201695AECB61F64ACD3F3F /* YoBroMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YoBroMobileApp.swift; sourceTree = "<group>"; };
+		F8A82012B6D6C03B5576C6D0 /* YoBroMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = YoBroMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1042C4A0347E6A8115845CAA /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				B09BA7A43FC8FA7C9CC4065A /* MobileTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		6659930CC68075556C3605F4 = {
+			isa = PBXGroup;
+			children = (
+				9EB1A674AFE414EED5991673 /* Resources */,
+				1042C4A0347E6A8115845CAA /* Tests */,
+				B6A15013E174D31BAD6ABB34 /* YOBRO */,
+				8B30EE4EE6085A0E006C974D /* YoBroMobile */,
+				C77BA78F933E3B07D7063DD6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8B30EE4EE6085A0E006C974D /* YoBroMobile */ = {
+			isa = PBXGroup;
+			children = (
+				78C808BAB71109BAC83FDD82 /* Assets.xcassets */,
+				93738CCB4C19958B1F6E450D /* Info.plist */,
+				389B9E992EE22CC64FC25E62 /* MobileDownloads.swift */,
+				BB382C21424F3C322284D991 /* MobileExtensions.swift */,
+				DABF8B569D1F36190381762E /* MobileProtection.swift */,
+				D7824F2FE6B58E987BDC5E74 /* MobileState.swift */,
+				6245FAA24AEBD256707D1F5C /* MobileSync.swift */,
+				52DDAADC7EA87DD7F30856F0 /* MobileTheme.swift */,
+				8C96B622761502F14B6E2D6D /* YoBroMobile.entitlements */,
+				F7201695AECB61F64ACD3F3F /* YoBroMobileApp.swift */,
+			);
+			path = YoBroMobile;
+			sourceTree = "<group>";
+		};
+		9EB1A674AFE414EED5991673 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				CEBAF68C9BF23E239DEB179E /* DarkReader-LICENSE.txt */,
+				8A3611B190C3643BE331BB43 /* DarkReader.js */,
+				C028CBE3A4A197B289B23734 /* uBlockOriginLite-NOTICE.txt */,
+				551AA7050EA1FE69127345A3 /* uBlockOriginLite.safari.zip */,
+				4DDD13253425C249A0FE2EA5 /* YOBROMark.png */,
+			);
+			name = Resources;
+			path = ../Sources/YOBRO/Resources;
+			sourceTree = "<group>";
+		};
+		B6A15013E174D31BAD6ABB34 /* YOBRO */ = {
+			isa = PBXGroup;
+			children = (
+				9578CC390FBF8C36F58D9A4B /* PersistedState.swift */,
+				ECCB1E23A33A130E942813E9 /* SupabaseAuth.swift */,
+				85A5DC27EB5089769FB8D5EE /* Theme.swift */,
+			);
+			name = YOBRO;
+			path = ../Sources/YOBRO;
+			sourceTree = "<group>";
+		};
+		C77BA78F933E3B07D7063DD6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F8A82012B6D6C03B5576C6D0 /* YoBroMobile.app */,
+				840977CFF5E0EE8E116BB242 /* YoBroMobileTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		752646AA0BE3537290D01792 /* YoBroMobileTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 77DF23E2A04DAA5C420ADBB1 /* Build configuration list for PBXNativeTarget "YoBroMobileTests" */;
+			buildPhases = (
+				D72E9BE6170669F6E85EF1F2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1539BA1713190A339D310960 /* PBXTargetDependency */,
+			);
+			name = YoBroMobileTests;
+			packageProductDependencies = (
+			);
+			productName = YoBroMobileTests;
+			productReference = 840977CFF5E0EE8E116BB242 /* YoBroMobileTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C46002B1F78B72ABC4890CF7 /* YoBroMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1C97715B5E7BFB531163BF76 /* Build configuration list for PBXNativeTarget "YoBroMobile" */;
+			buildPhases = (
+				765D989478DCE5472EAF9ECF /* Sources */,
+				6B3FD9D1683D7B1402DA81BB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = YoBroMobile;
+			packageProductDependencies = (
+			);
+			productName = YoBroMobile;
+			productReference = F8A82012B6D6C03B5576C6D0 /* YoBroMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5BDF8C0EF6D4468B76E49A92 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					752646AA0BE3537290D01792 = {
+						DevelopmentTeam = UW6QNH59X9;
+						ProvisioningStyle = Automatic;
+					};
+					C46002B1F78B72ABC4890CF7 = {
+						DevelopmentTeam = UW6QNH59X9;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = F271495BECB9ADB17140277C /* Build configuration list for PBXProject "YoBroMobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6659930CC68075556C3605F4;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C77BA78F933E3B07D7063DD6 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C46002B1F78B72ABC4890CF7 /* YoBroMobile */,
+				752646AA0BE3537290D01792 /* YoBroMobileTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		6B3FD9D1683D7B1402DA81BB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				243219D2CA191A73A95DB24F /* Assets.xcassets in Resources */,
+				8979ED510D516DAE4D1EBDC9 /* DarkReader-LICENSE.txt in Resources */,
+				BD01F53604AC4BACF96203C1 /* DarkReader.js in Resources */,
+				43F5537B8155D64458128A69 /* YOBROMark.png in Resources */,
+				2756C58800C2A762020D3295 /* uBlockOriginLite-NOTICE.txt in Resources */,
+				A0955EF2D9CE85FFEBB7A89F /* uBlockOriginLite.safari.zip in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		765D989478DCE5472EAF9ECF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6B4F6C4715E5D28FAE16A620 /* MobileDownloads.swift in Sources */,
+				7A303D600967EA0C618DC6B1 /* MobileExtensions.swift in Sources */,
+				935F6530A3DCE8DD635356B9 /* MobileProtection.swift in Sources */,
+				0B4C28DDDC27E78F0E32FB16 /* MobileState.swift in Sources */,
+				3A63FEF34E528675668FDCBF /* MobileSync.swift in Sources */,
+				E17145F9947B7009DDC5828B /* MobileTheme.swift in Sources */,
+				D1B3F247E8D65A295A62F88F /* PersistedState.swift in Sources */,
+				5446E4079F3593F24EDE4469 /* SupabaseAuth.swift in Sources */,
+				F296551E33F13012EAB72C2A /* Theme.swift in Sources */,
+				B86EE8A7914044D5CEDB2067 /* YoBroMobileApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D72E9BE6170669F6E85EF1F2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E2B1566012505F3E8708828B /* MobileTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1539BA1713190A339D310960 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C46002B1F78B72ABC4890CF7 /* YoBroMobile */;
+			targetProxy = 55FB5FF4A887B6F7528B335E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		17B105CBE239B1338DECCE9E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = UW6QNH59X9;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		47FE266C47128A4FF341301D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.aimo.yobro.YoBroMobileTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/YoBroMobile.app/YoBroMobile";
+			};
+			name = Release;
+		};
+		A8C0A6483AA74B906BBC0623 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = UW6QNH59X9;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C00CC3AD71C912181879C313 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = YoBroMobile/YoBroMobile.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = YoBroMobile/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = YoBro;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Webseiten können mit deiner Erlaubnis die Kamera verwenden.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Webseiten können mit deiner Erlaubnis das Mikrofon verwenden.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.yobro.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C4CEFAF205A6B8EE19ED0C17 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = YoBroMobile/YoBroMobile.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = YoBroMobile/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = YoBro;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Webseiten können mit deiner Erlaubnis die Kamera verwenden.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Webseiten können mit deiner Erlaubnis das Mikrofon verwenden.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.yobro.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		FCA7F472812CA6C46895883D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.aimo.yobro.YoBroMobileTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/YoBroMobile.app/YoBroMobile";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1C97715B5E7BFB531163BF76 /* Build configuration list for PBXNativeTarget "YoBroMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00CC3AD71C912181879C313 /* Debug */,
+				C4CEFAF205A6B8EE19ED0C17 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		77DF23E2A04DAA5C420ADBB1 /* Build configuration list for PBXNativeTarget "YoBroMobileTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FCA7F472812CA6C46895883D /* Debug */,
+				47FE266C47128A4FF341301D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F271495BECB9ADB17140277C /* Build configuration list for PBXProject "YoBroMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				17B105CBE239B1338DECCE9E /* Debug */,
+				A8C0A6483AA74B906BBC0623 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 5BDF8C0EF6D4468B76E49A92 /* Project object */;
+}
