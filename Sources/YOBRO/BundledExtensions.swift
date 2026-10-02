@@ -33,7 +33,7 @@ extension ExtensionStore {
         // A marker without an entry means the user explicitly removed it.
         if previous == nil && FileManager.default.fileExists(atPath: marker.path) { return }
         do {
-            guard let source = Bundle.module.url(forResource: "uBlockOriginLite.safari", withExtension: "zip") else {
+            guard let source = YOBROResources.bundle.url(forResource: "uBlockOriginLite.safari", withExtension: "zip") else {
                 throw YOBROError.message("Bundled uBlock Origin Lite package is missing.")
             }
             let ext = try await WKWebExtension(resourceBaseURL: source)

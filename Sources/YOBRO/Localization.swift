@@ -11,8 +11,10 @@ enum YOBROLanguage {
     static let identifier = identifier(for: Locale.preferredLanguages)
     static let isGerman = identifier == "de"
     static let locale = Locale(identifier: isGerman ? "de_DE" : "en_US")
+    /// BCP 47 tag for speech recognition and spoken replies.
+    static let speechLanguage = isGerman ? "de-DE" : "en-US"
     static let english: [String: String] = {
-        guard let url = Bundle.module.url(forResource: "English", withExtension: "json"),
+        guard let url = YOBROResources.bundle.url(forResource: "English", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let strings = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
         return strings

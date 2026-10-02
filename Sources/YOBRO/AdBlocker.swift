@@ -113,11 +113,11 @@ final class AdBlocker: NSObject, ObservableObject, WKScriptMessageHandler {
     private var ruleList: WKContentRuleList?
     private var compilationTask: Task<WKContentRuleList, Error>?
     private static let scriptSource: String = {
-        guard let url = Bundle.module.url(forResource: "AdBlocker", withExtension: "js") else { return "" }
+        guard let url = YOBROResources.bundle.url(forResource: "AdBlocker", withExtension: "js") else { return "" }
         return (try? String(contentsOf: url)) ?? ""
     }()
     private static let pageScriptSource: String = {
-        guard let url = Bundle.module.url(forResource: "AdBlockerPage", withExtension: "js") else { return "" }
+        guard let url = YOBROResources.bundle.url(forResource: "AdBlockerPage", withExtension: "js") else { return "" }
         return (try? String(contentsOf: url)) ?? ""
     }()
 

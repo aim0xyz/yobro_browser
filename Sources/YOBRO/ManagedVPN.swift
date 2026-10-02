@@ -169,7 +169,7 @@ final class ManagedVPNStore: ObservableObject {
         generation = currentGeneration
         status = .connecting
 
-        guard let helper = Bundle.module.url(forResource: "http2transport-yobro", withExtension: nil) else {
+        guard let helper = YOBROResources.bundle.url(forResource: "http2transport-yobro", withExtension: nil) else {
             throw YOBROError.message(L("Der Outline-VPN-Helfer fehlt in dieser YoBro-Version.", "The Outline VPN helper is missing from this YoBro build."))
         }
         let input = Pipe()

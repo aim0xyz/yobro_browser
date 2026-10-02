@@ -16,7 +16,7 @@ struct MailHTMLView: NSViewRepresentable {
         return view
     }
     static func document(_ html: String, remoteImages: Bool) -> String {
-        let policy = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: \(remoteImages ? "https: http:" : ""); font-src data:; frame-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+        let policy = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: \(remoteImages ? "https:" : ""); font-src data:; frame-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'"
         // Protocol-relative image URLs occur in newsletters but have no origin
         // when loaded via loadHTMLString. Resolve them without enabling scripts.
         let resolved = html.replacingOccurrences(of: "src=\"//", with: "src=\"https://", options: .caseInsensitive)

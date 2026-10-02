@@ -35,6 +35,9 @@ def verify(image):
             if attached: run(["hdiutil", "detach", str(mount)], stdout=subprocess.DEVNULL)
 
         run(["codesign", "--verify", "--deep", "--strict", str(relocated)])
+        run([sys.executable, str(ROOT / "scripts/verify-audio-entitlement.py"), str(relocated)])
+        run([sys.executable, str(ROOT / "scripts/verify-runtime-linkage.py"), str(relocated)])
+        run([sys.executable, str(ROOT / "scripts/verify-resource-bundle.py"), str(relocated)])
         run([sys.executable, str(ROOT / "scripts/audit-distribution.py"), str(relocated)])
         integrations = relocated / "Contents/Resources/AgentIntegrations"
         claude = folder / "Claude extension"

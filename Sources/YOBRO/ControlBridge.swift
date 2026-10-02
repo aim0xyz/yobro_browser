@@ -130,7 +130,7 @@ extension BrowserModel {
     func prepare(_ tab: BrowserTab) async throws {
         guard !tab.url.isEmpty else { throw YOBROError.message("Dieser Tab zeigt die Startseite. Zuerst eine URL öffnen.") }
         guard let resource = Bundle.main.url(forResource: "AgentBridge", withExtension: "js")
-            ?? Bundle.module.url(forResource: "AgentBridge", withExtension: "js") else { throw YOBROError.message("AgentBridge.js fehlt.") }
+            ?? YOBROResources.bundle.url(forResource: "AgentBridge", withExtension: "js") else { throw YOBROError.message("AgentBridge.js fehlt.") }
         _ = try await evaluate(String(contentsOf: resource), tab: tab)
     }
     func readTab(_ tab: BrowserTab) async throws -> [String: Any] {

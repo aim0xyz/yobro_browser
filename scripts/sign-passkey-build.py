@@ -23,7 +23,10 @@ def validate(profile, bundle_id):
         raise ValueError('The provisioning profile has expired.')
     keys = ['com.apple.application-identifier', 'com.apple.developer.team-identifier',
             'com.apple.developer.web-browser.public-key-credential', 'com.apple.developer.web-browser']
-    return {key: entitlements[key] for key in keys if key in entitlements}
+    signed = {key: entitlements[key] for key in keys if key in entitlements}
+    signed['com.apple.security.device.audio-input'] = True
+    signed['com.apple.security.automation.apple-events'] = True
+    return signed
 
 
 def main():

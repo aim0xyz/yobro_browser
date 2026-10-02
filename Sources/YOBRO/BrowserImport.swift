@@ -72,7 +72,7 @@ enum ImportWorker {
 
     static func call<T: Decodable>(_ request: [String: Any], as: T.Type) async throws -> T {
         let input = try JSONSerialization.data(withJSONObject: request)
-        guard let script = Bundle.module.url(forResource: "BrowserImport", withExtension: "py") else { throw YOBROError.message(L("Importmodul fehlt.")) }
+        guard let script = YOBROResources.bundle.url(forResource: "BrowserImport", withExtension: "py") else { throw YOBROError.message(L("Importmodul fehlt.")) }
         guard let python = interpreter else {
             throw YOBROError.message(L("Für den Import wird Python 3 benötigt. Installiere die Xcode-Befehlszeilenwerkzeuge oder Python 3.",
                                        "The import needs Python 3. Install the Xcode command line tools or Python 3."))
@@ -371,7 +371,9 @@ enum PasswordVault {
         } else if status != errSecSuccess { throw YOBROError.message(SecCopyErrorMessageString(status, nil) as String? ?? L("Schlüsselbundfehler")) }
         return true
     }
-    static func entries(home: URL, origin: String? = nil) throws -> [ImportPassword] {
+    /// `skipUnreadable` omits single entries that cannot be read instead of
+    /// failing the whole list, for callers that only need a best effort.
+    static func entries(home: URL, origin: String? = nil, skipUnreadable: Bool = false) throws -> [ImportPassword] {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service(home: home)]
         let query = base.merging([kSecReturnAttributes as String: true, kSecMatchLimit as String: kSecMatchLimitAll]) { _, new in new }
         var result: CFTypeRef?
@@ -387,7 +389,11 @@ enum PasswordVault {
             let lookup = base.merging([kSecAttrAccount as String: account, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]) { _, new in new }
             var value: CFTypeRef?
             let code = SecItemCopyMatching(lookup as CFDictionary, &value)
-            guard code == errSecSuccess, let data = value as? Data else { throw YOBROError.message(SecCopyErrorMessageString(code, nil) as String? ?? L("Schlüsselbundfehler")) }
+            guard code == errSecSuccess, let data = value as? Data else {
+                if skipUnreadable { return nil }
+                throw YOBROError.message(SecCopyErrorMessageString(code, nil) as String? ?? L("Schlüsselbundfehler"))
+            }
+            if skipUnreadable { return try? JSONDecoder().decode(ImportPassword.self, from: data) }
             return try JSONDecoder().decode(ImportPassword.self, from: data)
         }
     }

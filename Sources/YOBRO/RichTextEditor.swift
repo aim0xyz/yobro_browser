@@ -96,9 +96,10 @@ struct RichTextEditor: NSViewRepresentable {
     var rtf: Data?
     var fallbackText: String
     let commands: RichTextCommands
+    var adaptsEmailTextColor = false
     let changed: (Data, String) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(changed: changed) }
+    func makeCoordinator() -> Coordinator { Coordinator(adaptsEmailTextColor: adaptsEmailTextColor, changed: changed) }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -117,6 +118,7 @@ struct RichTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.changed = changed
+        context.coordinator.adaptsEmailTextColor = adaptsEmailTextColor
         guard let textView = scroll.documentView as? NSTextView else { return }
         commands.textView = textView
         guard !context.coordinator.editing,
@@ -128,7 +130,11 @@ struct RichTextEditor: NSViewRepresentable {
         var changed: (Data, String) -> Void
         var lastRTF: Data?
         var editing = false
-        init(changed: @escaping (Data, String) -> Void) { self.changed = changed }
+        var adaptsEmailTextColor: Bool
+        init(adaptsEmailTextColor: Bool = false, changed: @escaping (Data, String) -> Void) {
+            self.adaptsEmailTextColor = adaptsEmailTextColor
+            self.changed = changed
+        }
 
         func install(rtf: Data?, fallbackText: String, in textView: NSTextView) {
             editing = true
@@ -138,15 +144,20 @@ struct RichTextEditor: NSViewRepresentable {
                 textView.string = fallbackText
                 textView.font = .systemFont(ofSize: 15)
             }
+            updateAutomaticTextColor(in: textView)
             lastRTF = rtf
             editing = false
         }
 
         func textDidChange(_ notification: Notification) {
             guard !editing, let textView = notification.object as? NSTextView else { return }
+            editing = true
+            defer { editing = false }
+            updateAutomaticTextColor(in: textView)
             Self.clearOrphanedLinkTypingAttributes(in: textView)
+            let content = adaptsEmailTextColor ? MailTextColor.contentForExport(textView.attributedString()) : textView.attributedString()
             guard
-                  let data = textView.attributedString().rtf(from: NSRange(location: 0, length: textView.string.utf16.count), documentAttributes: [:]) else { return }
+                  let data = content.rtf(from: NSRange(location: 0, length: content.length), documentAttributes: [:]) else { return }
             lastRTF = data
             changed(data, textView.string)
         }
@@ -154,6 +165,15 @@ struct RichTextEditor: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !editing, let textView = notification.object as? NSTextView else { return }
             Self.clearOrphanedLinkTypingAttributes(in: textView)
+            if adaptsEmailTextColor {
+                textView.typingAttributes = MailTextColor.typingAttributes(textView.typingAttributes)
+            }
+        }
+
+        private func updateAutomaticTextColor(in textView: NSTextView) {
+            guard adaptsEmailTextColor else { return }
+            if let storage = textView.textStorage { MailTextColor.applyAutomaticTextColor(to: storage) }
+            textView.typingAttributes = MailTextColor.typingAttributes(textView.typingAttributes)
         }
 
         /// AppKit keeps the deleted run's typing attributes at the insertion

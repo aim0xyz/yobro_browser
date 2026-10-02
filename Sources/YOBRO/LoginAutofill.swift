@@ -37,7 +37,7 @@ final class LoginAutofill: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func install(on controller: WKUserContentController) {
-        guard let url = Bundle.module.url(forResource: "LoginAutofill", withExtension: "js"), let source = try? String(contentsOf: url) else { return }
+        guard let url = YOBROResources.bundle.url(forResource: "LoginAutofill", withExtension: "js"), let source = try? String(contentsOf: url) else { return }
         controller.add(self, contentWorld: Self.world, name: "yobroLogin")
         // Apple and other identity providers render their form in a same-origin
         // iframe. Install in every frame; the native origin checks below still

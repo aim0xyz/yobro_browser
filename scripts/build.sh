@@ -32,6 +32,15 @@ if [ -d "$BUILD_BIN/Sparkle.framework" ]; then
   # Preserve Sparkle's framework symlinks, XPC helpers and executable bits.
   ditto "$BUILD_BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 fi
+if /usr/bin/otool -L "$APP/Contents/MacOS/YOBRO" | /usr/bin/grep -q '@rpath/Sparkle.framework/'; then
+  test -f "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle" || {
+    echo "Error: Sparkle is linked but missing from the app bundle." >&2; exit 1;
+  }
+  # SwiftPM links Sparkle through @rpath but does not add the app bundle's
+  # Frameworks directory. Without this, dyld aborts before YoBro can start.
+  /usr/bin/install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP/Contents/MacOS/YOBRO"
+fi
+python3 scripts/verify-runtime-linkage.py "$APP"
 mkdir -p "$APP/Contents/Resources/YOBRO_YOBRO.bundle" "$APP/Contents/Resources/YOBRO_YOBROMCP.bundle"
 # Explicit allowlist. Never copy the checkout, a home directory or runtime state.
 for resource in AgentBridge.js MailWorker.py BrowserImport.py DarkReader.js WebAppearance.js \
@@ -45,6 +54,7 @@ for resource in AgentBridge.js MailWorker.py BrowserImport.py DarkReader.js WebA
 done
 cp bin/yobro "$APP/Contents/MacOS/yobroctl"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+python3 scripts/verify-resource-bundle.py "$APP"
 if [ -n "${YOBRO_UPDATE_FEED_URL:-}" ]; then
   /usr/libexec/PlistBuddy -c "Set :SUFeedURL $YOBRO_UPDATE_FEED_URL" "$APP/Contents/Info.plist"
 fi
@@ -74,12 +84,13 @@ sign_app() {
   else
     rm -f "$target/Contents/embedded.provisionprofile"
     if [ -n "${YOBRO_SIGN_IDENTITY:-}" ]; then
-      codesign --force --deep --options runtime --timestamp --sign "$YOBRO_SIGN_IDENTITY" "$target"
+      codesign --force --deep --options runtime --timestamp --entitlements Resources/YoBro.entitlements --sign "$YOBRO_SIGN_IDENTITY" "$target"
     else
-      codesign --force --deep --sign - "$target"
+      codesign --force --deep --entitlements Resources/YoBro.entitlements --sign - "$target"
     fi
   fi
   codesign --verify --deep --strict "$target"
+  python3 scripts/verify-audio-entitlement.py "$target"
 }
 
 sign_app "$APP"
@@ -105,6 +116,7 @@ if ! sign_app "$FINAL_APP"; then
   if [ -d "$PREVIOUS_APP" ]; then mv "$PREVIOUS_APP" "$REPLACED_APP"; fi
   exit 1
 fi
+python3 scripts/verify-runtime-linkage.py "$FINAL_APP"
 if ! python3 scripts/audit-distribution.py "$FINAL_APP" --report "$STAGING_ROOT/privacy-audit.json"; then
   rm -rf "$FINAL_APP"
   if [ -d "$PREVIOUS_APP" ]; then mv "$PREVIOUS_APP" "$REPLACED_APP"; fi

@@ -914,6 +914,11 @@ final class BrowserModel: ObservableObject {
         endAgentWorkspace()
     }
 
+    func closeAgentWorkspace() {
+        if chat.running { voice.stopCurrentAction(browser: self) }
+        endAgentWorkspace()
+    }
+
     func endAgentWorkspace() {
         agentSessionActive = false
         agentWorkspaceVisible = false
@@ -978,7 +983,7 @@ final class BrowserModel: ObservableObject {
                 try JSONEncoder().encode(AgentAccessPermission(allowed: agentEnabled)).write(to: file, options: .atomic)
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             } catch { notice = L("Agent-Freigabe konnte nicht gespeichert werden.", "Could not save agent permission.") }
-            if !agentEnabled { agentSessionActive = false; chat.cancel(); agentGeneration = UUID(); for tab in tabs where agentTabIDs.contains(tab.id) { tab.webView.stopLoading() } }
+            if !agentEnabled { voice.stop(); agentSessionActive = false; chat.cancel(); agentGeneration = UUID(); for tab in tabs where agentTabIDs.contains(tab.id) { tab.webView.stopLoading() } }
         }
     }
     @Published var bridgeStatus = L("Startet …")
@@ -1026,7 +1031,7 @@ final class BrowserModel: ObservableObject {
     @Published var creatingProfile = false
     @Published var settingsSection = L("Erweiterungen")
     @Published var profileName = L("Privat", "Personal")
-    var isProfileActive = true { didSet { if !isProfileActive { chat.cancel(); pauseAgentWorkspace() } } }
+    var isProfileActive = true { didSet { if !isProfileActive { voice.stop(); chat.cancel(); pauseAgentWorkspace() } } }
     weak var profileSession: BrowserProfiles?
     let controlSocketURL: URL
     let home: URL
@@ -1051,6 +1056,8 @@ final class BrowserModel: ObservableObject {
     let downloads: DownloadStore
     let mail: MailStore
     let chat: SpaceChatStore
+    let voice = YoBroVoice()
+    let workspaces: BroWorkspaceStore
     let proxies: SpaceProxyStore
     let managedVPN: ManagedVPNStore
     let webAppearance: WebAppearance
@@ -1087,6 +1094,7 @@ final class BrowserModel: ObservableObject {
         downloads = DownloadStore(home: home, isolated: testing || !original)
         mail = MailStore(home: home)
         chat = SpaceChatStore(home: home)
+        workspaces = BroWorkspaceStore(home: home)
         proxies = SpaceProxyStore(home: home)
         managedVPN = ManagedVPNStore(home: home)
         webAppearance = WebAppearance(home: home)

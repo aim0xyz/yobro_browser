@@ -135,7 +135,7 @@ final class WebAppearance: ObservableObject {
         // the first tab the browser opens.
         ["DarkReader", "WebAppearance"].compactMap { name -> String? in
             guard let url = Bundle.main.url(forResource: name, withExtension: "js")
-                ?? Bundle.module.url(forResource: name, withExtension: "js") else { return nil }
+                ?? YOBROResources.bundle.url(forResource: name, withExtension: "js") else { return nil }
             return try? String(contentsOf: url)
         }.joined(separator: "\n")
     }()

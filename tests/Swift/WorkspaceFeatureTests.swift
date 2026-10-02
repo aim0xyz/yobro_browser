@@ -248,7 +248,8 @@ final class WorkspaceFeatureTests: XCTestCase {
         let document = MailHTMLView.document(html, remoteImages:false)
         XCTAssertTrue(document.contains("script-src 'none'")); XCTAssertFalse(document.contains("img-src data: https:"))
         XCTAssertTrue(document.contains("overflow-y:auto!important"))
-        XCTAssertTrue(MailHTMLView.document(html, remoteImages:true).contains("img-src data: https: http:"))
+        XCTAssertTrue(MailHTMLView.document(html, remoteImages:true).contains("img-src data: https:"))
+        XCTAssertFalse(MailHTMLView.document(html, remoteImages:true).contains("img-src data: https: http:"))
         XCTAssertTrue(MailHTMLView.document("<img src='//cdn.example.test/a.png'>", remoteImages:true).contains("src='https://cdn.example.test/a.png'"))
     }
 }

@@ -327,7 +327,12 @@ struct BrowserShell: View {
                 .padding(.trailing, 22).padding(.bottom, 22)
         }
         .overlay {
-            AgentActivityFrame(model: model, chat: model.chat)
+            AgentActivityFrame(model: model, chat: model.chat, voice: model.voice)
+        }
+        .overlay(alignment: .bottomLeading) {
+            VoiceStatusHUD(model: model, chat: model.chat, voice: model.voice)
+                .padding(.leading, 24)
+                .padding(.bottom, 24)
         }
         .overlay {
             if let dialog = model.webPageDialog {
@@ -340,6 +345,16 @@ struct BrowserShell: View {
         .environment(\.locale, YOBROLanguage.locale)
         .animation(.easeInOut(duration: 0.2), value: model.showAgent)
         .animation(.easeInOut(duration: 0.2), value: model.showSidebar)
+        .task {
+            if Bundle.main.bundleIdentifier == "local.yobro.browser" {
+                await model.voice.resumeIfEnabled(browser: model)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if Bundle.main.bundleIdentifier == "local.yobro.browser" {
+                Task { await model.voice.resumeIfEnabled(browser: model) }
+            }
+        }
         .onDisappear { sidebarOverlayCloseTask?.cancel() }
         .onChange(of: model.showSidebar) { _, shown in
             sidebarOverlayCloseTask?.cancel()
@@ -483,8 +498,8 @@ struct BrowserShell: View {
                 Spacer(minLength: 8)
                 Text(owner).font(.system(size: 8, weight: .bold, design: .rounded)).tracking(0.8).foregroundStyle(color)
                 if !interactive {
-                    Button { model.pauseAgentWorkspace() } label: { Image(systemName: "xmark").frame(width: 22, height: 22) }
-                        .buttonStyle(.plain).yobroHelp(L("Agent-Sitzung beenden", "End agent session"))
+                    Button { model.closeAgentWorkspace() } label: { Image(systemName: "xmark").frame(width: 22, height: 22) }
+                        .buttonStyle(.plain).yobroHelp(L("Agent-Browser schließen", "Close agent browser"))
                 }
             }.padding(.horizontal, 9).frame(height: 27)
             TabContent(tab: tab, model: model).id(tab.id).allowsHitTesting(interactive)
@@ -581,7 +596,7 @@ private struct AgentPanelRail: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            SpaceChatPanel(browser: model, chat: model.chat)
+            SpaceChatPanel(browser: model, chat: model.chat, voice: model.voice)
                 .frame(width: 320)
                 .offset(x: model.showAgent ? 0 : 320)
                 .opacity(model.showAgent ? 1 : 0)
@@ -1668,28 +1683,34 @@ struct NewTabPage: View {
 
     var body: some View {
         GeometryReader { geometry in
-        let cardWidth = min(540, max(220, geometry.size.width - 32))
+        let cardWidth = min(tab?.isPrivate == true ? 540 : 820, max(220, geometry.size.width - 32))
         let compact = geometry.size.width < 620 || geometry.size.height < 620
-        VStack(spacing: compact ? 14 : 22) {
-            Spacer()
-            VStack(spacing: compact ? 6 : 10) {
-                if tab?.isPrivate == true {
+        ScrollView(.vertical) {
+        VStack(spacing: compact ? 12 : 16) {
+            if tab?.isPrivate == true {
+                Spacer()
+                VStack(spacing: compact ? 6 : 10) {
                     Image(systemName: "eyeglasses")
                         .font(.system(size: compact ? 38 : 58, weight: .light))
                         .foregroundStyle(moss)
-                } else {
-                    YOBROMark(size: compact ? 52 : 82)
+                    Text(L("Privates Browsen", "Private browsing"))
+                        .font(.system(size: compact ? 30 : 42, weight: .semibold, design: .rounded))
+                        .tracking(-2)
+                    Text(L("Cookies und Websitedaten bleiben nur bis zum Schließen des Tabs. Verlauf und Sitzung werden nicht gespeichert.", "Cookies and website data last only until you close the tab. History and session are not saved."))
+                        .font(.system(size: 13)).foregroundStyle(ink.opacity(0.5))
+                        .multilineTextAlignment(.center).frame(maxWidth: 520)
                 }
-                Text(tab?.isPrivate == true ? L("Privates Browsen", "Private browsing") : "YoBro")
-                    .font(.system(size: compact ? 30 : 42, weight: .semibold, design: .rounded))
-                    .tracking(-2)
-                Text(tab?.isPrivate == true
-                     ? L("Cookies und Websitedaten bleiben nur bis zum Schließen des Tabs. Verlauf und Sitzung werden nicht gespeichert.", "Cookies and website data last only until you close the tab. History and session are not saved.")
-                     : L("Wohin geht es als Nächstes?", "Where to next?"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(ink.opacity(0.5))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520)
+            } else {
+                HStack(spacing: 10) {
+                    YOBROMark(size: 34)
+                    Text("YoBro").font(.system(size: 21, weight: .semibold, design: .rounded))
+                    Text(L("Dashboard", "Dashboard")).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(model.space).font(.system(size: 10, weight: .medium)).foregroundStyle(moss)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(moss.opacity(0.09), in: Capsule())
+                }
+                .frame(width: cardWidth)
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
@@ -1727,10 +1748,12 @@ struct NewTabPage: View {
                         }
                     }
                 }
-                Text(L("Adresse eingeben oder direkt im Web suchen · Enter zum Öffnen", "Enter an address or search the web · Press Enter to open"))
-                    .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 4)
+                if tab?.isPrivate == true {
+                    Text(L("Adresse eingeben oder direkt im Web suchen · Enter zum Öffnen", "Enter an address or search the web · Press Enter to open"))
+                        .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 4)
+                }
             }
-            .padding(16)
+            .padding(tab?.isPrivate == true ? 16 : 10)
             .frame(width: cardWidth)
             .background(YOBROTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(YOBROTheme.border.opacity(0.45)))
@@ -1752,11 +1775,20 @@ struct NewTabPage: View {
                 selectedSuggestion = SuggestionSelection.previous(selectedSuggestion)
                 return .handled
             }
+            if tab?.isPrivate != true {
+                BroDashboard(model: model, chat: model.chat, mail: model.mail, workspaces: model.workspaces, voice: model.voice)
+                    .padding(.horizontal, 16)
+            }
             // Balance the flexible space above and below the start content.
             // The previous fixed bottom inset pushed the whole composition too
             // far down, especially after closing a tab into this empty state.
             Spacer()
         }
+        .padding(.top, tab?.isPrivate == true ? 0 : 28)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: geometry.size.height)
+        }
+        .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RadialGradient(colors: [moss.opacity(0.08), .clear], center: .center, startRadius: 20, endRadius: 420)
@@ -1869,7 +1901,7 @@ struct YOBROMark: View {
     var size: CGFloat
 
     private static let artwork: NSImage? = {
-        guard let url = Bundle.module.url(forResource: "YOBROMark", withExtension: "png") else { return nil }
+        guard let url = YOBROResources.bundle.url(forResource: "YOBROMark", withExtension: "png") else { return nil }
         return NSImage(contentsOf: url)
     }()
 
@@ -1903,19 +1935,25 @@ private struct AgentPageHeader: View {
 private struct AgentActivityFrame: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject var chat: SpaceChatStore
+    @ObservedObject var voice: YoBroVoice
+
+    private var activeConversation: Bool {
+        voice.optionRecordingActive || voice.isListening && VoiceWake.acceptsFollowUp(until: voice.activeUntil)
+    }
+    private var frameColor: Color { activeConversation ? YOBROTheme.voiceListening : brandOrange }
 
     var body: some View {
-        if model.agentUsageActive {
+        if activeConversation || model.agentUsageActive {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(brandOrange.opacity(0.85), lineWidth: 2)
+                    .stroke(frameColor.opacity(0.85), lineWidth: 2)
                     .padding(1)
                 RoundedRectangle(cornerRadius: 17)
-                    .stroke(brandOrange.opacity(0.28), lineWidth: 10)
+                    .stroke(frameColor.opacity(0.28), lineWidth: 10)
                     .blur(radius: 12)
                     .padding(7)
                 RoundedRectangle(cornerRadius: 19)
-                    .stroke(brandOrange.opacity(0.14), lineWidth: 20)
+                    .stroke(frameColor.opacity(0.14), lineWidth: 20)
                     .blur(radius: 24)
                     .padding(10)
             }
@@ -1924,6 +1962,47 @@ private struct AgentActivityFrame: View {
             .ignoresSafeArea(.container, edges: .top)
             .allowsHitTesting(false)
             .transition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: activeConversation)
+        }
+    }
+}
+
+private struct VoiceStatusHUD: View {
+    @ObservedObject var model: BrowserModel
+    @ObservedObject var chat: SpaceChatStore
+    @ObservedObject var voice: YoBroVoice
+
+    private var canStop: Bool { chat.running || voice.hasCurrentActivity }
+
+    var body: some View {
+        if voice.enabled || chat.running {
+            Group {
+                if canStop {
+                    Button {
+                        voice.stopCurrentAction(browser: model)
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.red, in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L("Aktuelle Aktion stoppen", "Stop current action"))
+                    .accessibilityValue(voice.state)
+                    .help(voice.state)
+                } else {
+                    Circle()
+                        .fill(moss)
+                        .frame(width: 11, height: 11)
+                        .frame(width: 36, height: 36)
+                        .accessibilityLabel(voice.state)
+                        .help(voice.state)
+                }
+            }
+            .shadow(color: .black.opacity(canStop ? 0.22 : 0.12), radius: canStop ? 10 : 5, y: 3)
+            .animation(.easeInOut(duration: 0.2), value: canStop)
         }
     }
 }

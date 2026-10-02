@@ -12,6 +12,14 @@ struct OpenRouterModel: Decodable, Identifiable, Hashable {
     let id: String
     let name: String?
     let pricing: Pricing?
+    let supportedParameters: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, pricing
+        case supportedParameters = "supported_parameters"
+    }
+
+    var supportsTools: Bool { supportedParameters?.contains("tools") == true }
 
     var isFree: Bool {
         if id == "openrouter/free" || id.hasSuffix(":free") { return true }
@@ -24,6 +32,18 @@ enum OpenRouterOAuth {
     static let referer = "https://yobro.lol"
     static let title = "YoBro"
     static let keyLabel = "YoBro"
+
+    static func callbackCode(from request: String) -> String? {
+        guard let line = request.components(separatedBy: "\r\n").first else { return nil }
+        let fields = line.split(separator: " ")
+        guard fields.count == 3, fields[0] == "GET", fields[2] == "HTTP/1.1",
+              let components = URLComponents(string: "http://127.0.0.1\(fields[1])"),
+              components.path == "/openrouter/callback",
+              let codes = components.queryItems?.filter({ $0.name == "code" }),
+              codes.count == 1, let code = codes[0].value,
+              !code.isEmpty, code.utf8.count <= 2048 else { return nil }
+        return code
+    }
 
     static func base64URL(_ data: Data) -> String {
         data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
@@ -100,9 +120,12 @@ private final class OpenRouterCallbackReceiver: @unchecked Sendable {
     private let queue = DispatchQueue(label: "yobro.openrouter.oauth")
     private var continuation: CheckedContinuation<String, Error>?
     private var received: Result<String, Error>?
+    private var completed = false
 
     init() throws {
-        listener = try NWListener(using: .tcp, on: .any)
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        listener = try NWListener(using: parameters, on: .any)
     }
 
     func start() async throws -> URL {
@@ -133,19 +156,32 @@ private final class OpenRouterCallbackReceiver: @unchecked Sendable {
 
     private func receive(_ connection: NWConnection) {
         connection.start(queue: queue)
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, _, _ in
-            guard let self, let data, let request = String(data: data, encoding: .utf8),
-                  let line = request.components(separatedBy: "\r\n").first,
-                  let target = line.split(separator: " ").dropFirst().first,
-                  let components = URLComponents(string: "http://127.0.0.1\(target)") else { connection.cancel(); return }
-            let values = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-            let code = values["code"]
-            let html = code == nil ? "OpenRouter connection failed. You can close this tab." : "OpenRouter is connected to YoBro. You can close this tab."
+        readRequestLine(connection, data: Data())
+    }
+
+    private func readRequestLine(_ connection: NWConnection, data: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] chunk, _, complete, error in
+            guard let self, error == nil else { connection.cancel(); return }
+            var data = data
+            if let chunk { data.append(chunk) }
+            guard data.count <= 16_384 else { connection.cancel(); return }
+            guard let lineEnd = data.range(of: Data("\r\n".utf8)) else {
+                if complete { connection.cancel() }
+                else { self.readRequestLine(connection, data: data) }
+                return
+            }
+            guard let line = String(data: data[..<lineEnd.lowerBound], encoding: .utf8) else { connection.cancel(); return }
+            let request = line + "\r\n"
+            let code = OpenRouterOAuth.callbackCode(from: request)
+            let html = code == nil ? "Invalid OpenRouter callback. You can close this tab." : "OpenRouter is connected to YoBro. You can close this tab."
             let body = Data(html.utf8)
-            let response = Data("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
+            let status = code == nil ? "400 Bad Request" : "200 OK"
+            let response = Data("HTTP/1.1 \(status)\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
             connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            guard let code, !self.completed else { return }
+            self.completed = true
             self.listener.cancel()
-            let result: Result<String, Error> = code.map(Result.success) ?? .failure(YOBROError.message(L("Ungültige OpenRouter-Antwort.", "Invalid OpenRouter response.")))
+            let result: Result<String, Error> = .success(code)
             if let continuation = self.continuation { continuation.resume(with: result) }
             else { self.received = result }
             self.continuation = nil

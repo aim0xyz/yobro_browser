@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import LocalAuthentication
+import AVFoundation
 
 @MainActor
 final class APIKeyRevealAuthenticator {
@@ -21,6 +22,8 @@ final class APIKeyRevealAuthenticator {
 struct SpaceChatPanel: View {
     @ObservedObject var browser: BrowserModel
     @ObservedObject var chat: SpaceChatStore
+    @ObservedObject var voice: YoBroVoice
+    @State private var editingVoiceKey = false
     @State private var settings = false
     @State private var sentDetailsExpanded = false
     @State private var externalAgentAccessExpanded = false
@@ -36,6 +39,7 @@ struct SpaceChatPanel: View {
     private let apiKeyAuthenticator = APIKeyRevealAuthenticator()
 
     private var rows: [SpaceChatEntry] { chat.entries.filter { $0.space == browser.space } }
+    private var microphoneDenied: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .denied }
     private var configured: Bool {
         !chat.connection.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !chat.connection.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -49,11 +53,14 @@ struct SpaceChatPanel: View {
             header
             Divider().opacity(0.55)
             VStack(spacing: 12) {
-                if settings { connectionSettings }
-                else if !configured { connectionPrompt }
+                if !browser.agentEnabled { agentAccessPrompt }
+                if !configured { connectionPrompt }
 
                 conversation
                 if let url = chat.pendingURL { approval(url) }
+                if let mail = chat.pendingMail { mailApproval(mail) }
+                if let command = chat.pendingCommand { commandApproval(command) }
+                if let action = chat.pendingMacAction { macActionApproval(action) }
                 if let error = chat.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange).lineLimit(3)
@@ -77,7 +84,13 @@ struct SpaceChatPanel: View {
             chatScrollTask?.cancel()
             lockAPIKey()
         }
+        .onAppear { editingVoiceKey = voice.fishKey.isEmpty }
         .onChange(of: chat.connection.endpoint) { _, _ in lockAPIKey() }
+        .onChange(of: browser.isProfileActive) { _, active in if !active { voice.stop() } }
+        .onChange(of: browser.agentEnabled) { _, active in
+            if !active { voice.stop() }
+            else { Task { await voice.resumeIfEnabled(browser: browser) } }
+        }
     }
 
     private var header: some View {
@@ -87,9 +100,30 @@ struct SpaceChatPanel: View {
                 Text(browser.space).font(.system(size: 16, weight: .semibold, design: .rounded)).lineLimit(1)
             }
             Spacer()
-            statusPill
+            if chat.running || voice.hasCurrentActivity {
+                headerButton("stop.fill", L("Aktuelle Aktion stoppen", "Stop current action")) {
+                    voice.stopCurrentAction(browser: browser)
+                }
+                .foregroundStyle(.red)
+            } else {
+                statusPill
+            }
             headerButton("square.and.pencil", L("Neuer Chat", "New chat")) { chat.newChat(space: browser.space) }
-            headerButton("slider.horizontal.3", L("Modell verbinden", "Connect model")) { settings.toggle() }
+            headerButton("slider.horizontal.3", L("Agent-Einstellungen", "Agent settings")) { settings.toggle() }
+                .popover(isPresented: $settings, arrowEdge: .leading) {
+                    ScrollView {
+                        VStack(spacing: 12) { voiceSettings; connectionSettings }
+                            .padding(14)
+                    }
+                    .frame(width: 380, height: 540)
+                    .background(YOBROTheme.chromeBottom)
+                    .task {
+                        if ChatProviderPreset.matching(chat.connection.endpoint) == .openRouter,
+                           !chat.apiKey.isEmpty, chat.openRouterModels.isEmpty {
+                            await chat.loadOpenRouterModels()
+                        }
+                    }
+                }
             headerButton("xmark", L("Assistent schließen", "Close assistant")) { browser.showAgent = false }
         }
         .padding(.horizontal, 12).padding(.top, 32).padding(.bottom, 12)
@@ -98,12 +132,80 @@ struct SpaceChatPanel: View {
 
     private var statusPill: some View {
         HStack(spacing: 5) {
-            Circle().fill(chat.running ? Color.orange : configured ? moss : Color.secondary).frame(width: 6, height: 6)
-            Text(chat.running ? L("Läuft", "Working") : configured ? L("Bereit", "Ready") : L("Setup", "Setup"))
+            Circle().fill(chat.running ? Color.orange : !browser.agentEnabled ? Color.orange : configured ? moss : Color.secondary).frame(width: 6, height: 6)
+            Text(chat.running ? L("Läuft", "Working") : !browser.agentEnabled ? L("Pausiert", "Paused") : configured ? L("Bereit", "Ready") : L("Setup", "Setup"))
                 .font(.system(size: 9, weight: .semibold))
         }
         .padding(.horizontal, 8).frame(height: 25)
         .background(YOBROTheme.surface.opacity(0.45), in: Capsule())
+    }
+
+    private var voiceSettings: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label(L("Sprachaktivierung", "Voice activation"), systemImage: "waveform")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button { settings = false } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("Einstellungen schließen", "Close settings"))
+            }
+            Picker(L("Sprechen mit", "Speak with"), selection: $voice.activationMode) {
+                ForEach(VoiceActivationMode.allCases) { mode in Text(mode.title).tag(mode) }
+            }
+            .pickerStyle(.menu)
+            Button(voice.enabled ? L("Sprachmodus ausschalten", "Turn voice off") : L("Sprachmodus einschalten", "Turn voice on")) {
+                Task { await voice.toggle(browser: browser) }
+            }
+            .buttonStyle(.borderedProminent).tint(moss).controlSize(.small)
+            Text(voice.activationMode == .wakeWord
+                 ? L("YoBro hört nach dem Einschalten auf „Yo Bro“. Danach bleiben Folgefragen eine Minute lang ohne Aktivierungswort möglich. „Yo Bro Stopp“ bricht die aktuelle Aktion und Sprachausgabe ab.", "After enabling, YoBro listens for “Yo Bro”. Follow-up requests work without the wake word for one minute. “Yo Bro Stop” cancels the current action and speech.")
+                 : L("Halte die rechte Option-Taste zum Sprechen gedrückt und lasse sie zum Senden los. „Yo Bro“ funktioniert zusätzlich. Für die Nutzung außerhalb von YoBro kann macOS Eingabeüberwachung verlangen.", "Hold right Option to speak and release it to send. “Yo Bro” also works. macOS may require Input Monitoring outside YoBro."))
+                .font(.system(size: 9)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(voice.state).font(.system(size: 9, weight: .medium)).foregroundStyle(moss)
+            if let latencySummary = voice.latencySummary {
+                Text(latencySummary).font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            if microphoneDenied { microphonePermissionButton }
+            if !voice.lastHeard.isEmpty {
+                Text(L("Zuletzt erkannt: ", "Last recognized: ") + voice.lastHeard)
+                    .font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Divider()
+            if editingVoiceKey {
+                HStack(spacing: 5) {
+                    SecureField(L("Fish-Audio-Schlüssel", "Fish Audio key"), text: $voice.fishKey)
+                        .textFieldStyle(.roundedBorder).controlSize(.small)
+                    Button(L("Sichern", "Save")) {
+                        if voice.saveKey() { editingVoiceKey = false }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                }
+            } else {
+                Button(L("Fish-Schlüssel ändern", "Change Fish key")) { editingVoiceKey = true }
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(moss)
+            }
+            Text(voice.recognizesWakeWordOnDevice
+                 ? L("Bis zum Aktivierungswort bleibt das Audio auf diesem Mac. Danach und bei Option-Aufnahmen kann Apple das Audio verarbeiten. Erkannte private Textstellen spricht YoBro lokal; übriger Text geht mit eingerichtetem Schlüssel an Fish Audio.",
+                     "Until the wake word, audio stays on this Mac. After it and during Option recordings, Apple may process the audio. YoBro speaks detected private text locally; other text goes to Fish Audio when a key is configured.")
+                 : L("Dieser Mac unterstützt keine lokale Spracherkennung. Solange der Sprachmodus an ist, kann Apple das Mikrofon-Audio verarbeiten. Erkannte private Textstellen spricht YoBro lokal; übriger Text geht mit eingerichtetem Schlüssel an Fish Audio.",
+                     "This Mac does not support on-device speech recognition. While voice mode is on, Apple may process microphone audio. YoBro speaks detected private text locally; other text goes to Fish Audio when a key is configured."))
+                .font(.system(size: 9)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(YOBROTheme.surface.opacity(0.62), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var microphonePermissionButton: some View {
+        Button(L("Mikrofon in macOS freigeben", "Allow microphone in macOS")) {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        .buttonStyle(.plain).font(.system(size: 9, weight: .semibold)).foregroundStyle(.orange)
     }
 
     private func headerButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
@@ -126,6 +228,19 @@ struct SpaceChatPanel: View {
         }.padding(12).background(moss.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private var agentAccessPrompt: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pause.circle.fill").foregroundStyle(.orange)
+            Text(L("Agentenzugriff pausiert", "Agent access paused"))
+                .font(.system(size: 11, weight: .medium))
+            Spacer(minLength: 4)
+            Button(L("Aktivieren", "Enable")) { browser.agentEnabled = true }
+                .buttonStyle(.borderedProminent).tint(moss).controlSize(.small)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
+    }
+
     private var connectionSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -133,6 +248,9 @@ struct SpaceChatPanel: View {
                 Spacer()
                 Button { settings = false } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
             }
+            Text(L("YoBro bleibt dein Agent. Hier wählst du nur, über welchen Anbieter und welches Modell er denkt. Seine Browser-, Mail- und Arbeitsmaterial-Aktionen bleiben dieselben; das Modell muss Tool-Aufrufe unterstützen. Fish Audio ist separat für die Stimme.",
+                   "YoBro remains your agent. Here you choose only the provider and model it uses to think. Its browser, mail and workspace actions stay the same; the model must support tool calls. Fish Audio is separate for voice."))
+                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker(L("Anbieter", "Provider"), selection: providerSelection) {
                 ForEach(ChatProviderPreset.allCases) { provider in Text(provider.title).tag(provider) }
             }
@@ -148,13 +266,23 @@ struct SpaceChatPanel: View {
             }
             if ChatProviderPreset.matching(chat.connection.endpoint) == .openRouter && !chat.openRouterModels.isEmpty {
                 Picker(L("Modell", "Model"), selection: $chat.connection.model) {
-                    if !chat.openRouterModels.contains(where: { $0.id == chat.connection.model }) {
+                    Text("Auto Router").tag("openrouter/auto")
+                    if chat.connection.model != "openrouter/auto" && !chat.openRouterModels.contains(where: { $0.id == chat.connection.model && $0.supportsTools }) {
                         Text(chat.connection.model).tag(chat.connection.model)
                     }
-                    ForEach(OpenRouterOAuth.sortedModels(chat.openRouterModels, freeFirst: freeModelsFirst)) { model in
+                    ForEach(OpenRouterOAuth.sortedModels(chat.openRouterModels.filter(\.supportsTools).filter { $0.id != "openrouter/auto" }, freeFirst: freeModelsFirst)) { model in
                         Text(model.isFree ? "FREE · \(model.name ?? model.id)" : (model.name ?? model.id)).tag(model.id)
                     }
                 }.pickerStyle(.menu)
+                if chat.connection.model == "openrouter/auto" {
+                    Text(L("Auto Router kann ein Modell ohne Agent-Aktionen wählen. Falls die Anfrage scheitert, wähle unten ein Modell mit Tool-Unterstützung.",
+                           "Auto Router can choose a model without agent actions. If a request fails, choose a model with tool support below."))
+                        .font(.system(size: 9)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                } else if let selected = chat.openRouterModels.first(where: { $0.id == chat.connection.model }), !selected.supportsTools {
+                    Text(L("Dieses Modell unterstützt laut OpenRouter keine Tool-Aufrufe und kann YoBro-Aktionen nicht ausführen.",
+                           "According to OpenRouter, this model does not support tool calls and cannot perform YoBro actions."))
+                        .font(.system(size: 9)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 Toggle(L("Kostenlose Modelle zuerst", "Free models first"), isOn: $freeModelsFirst)
                     .toggleStyle(.checkbox).controlSize(.small).font(.system(size: 10))
             } else if ChatProviderPreset.matching(chat.connection.endpoint) == .anthropic {
@@ -246,7 +374,11 @@ struct SpaceChatPanel: View {
                     .font(.system(size: 9)).foregroundStyle(.secondary)
                 Spacer()
                 Button(L("Speichern", "Save")) {
-                    do { try chat.saveConnection(); lockAPIKey(); settings = false } catch { chat.error = error.localizedDescription }
+                    do {
+                        try chat.saveConnection()
+                        lockAPIKey(); settings = false
+                        Task { await voice.resumeIfEnabled(browser: browser) }
+                    } catch { chat.error = error.localizedDescription }
                 }.buttonStyle(.borderedProminent).tint(moss).controlSize(.small)
             }
         }
@@ -386,6 +518,70 @@ struct SpaceChatPanel: View {
         }.padding(12).background(moss.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private func mailApproval(_ mail: MailSendApproval) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L("Diese E-Mail senden?", "Send this email?"), systemImage: "envelope.badge.shield.half.filled")
+                .font(.system(size: 12, weight: .semibold))
+            Text(L("Von: ", "From: ") + mail.from)
+            Text(L("An: ", "To: ") + mail.to)
+            Text(L("Betreff: ", "Subject: ") + mail.subject)
+            ScrollView { Text(mail.body).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
+                .frame(maxHeight: 140)
+                .padding(7)
+                .background(YOBROTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
+            HStack {
+                Button(L("Entwurf behalten", "Keep draft")) { chat.resolve(false) }
+                Spacer()
+                Button(L("Jetzt senden", "Send now")) { chat.resolve(true) }
+                    .buttonStyle(.borderedProminent).tint(moss)
+            }.controlSize(.small)
+        }
+        .font(.system(size: 10))
+        .padding(12)
+        .background(moss.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func macActionApproval(_ action: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L("Mac-Aktion erlauben?", "Allow Mac action?"), systemImage: "macwindow")
+                .font(.system(size: 12, weight: .semibold))
+            Text(action).font(.system(size: 11, weight: .medium))
+            Text(L("Der Agent hat in dieser Anfrage Seiten-, Mail-, Notiz- oder Ordnerinhalte gelesen. Bestätige nur, wenn du diese Aktion selbst wolltest.",
+                   "The agent read page, mail, note or folder content in this request. Allow only if you asked for this action yourself."))
+                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button(L("Ablehnen", "Decline")) { chat.resolve(false) }
+                Spacer()
+                Button(L("Erlauben", "Allow")) { chat.resolve(true) }
+                    .buttonStyle(.borderedProminent).tint(moss)
+            }.controlSize(.small)
+        }
+        .padding(12)
+        .background(moss.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func commandApproval(_ command: BroCommandApproval) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L("App Store Connect ändern?", "Change App Store Connect?"), systemImage: "app.badge.checkmark")
+                .font(.system(size: 12, weight: .semibold))
+            Text(command.workspace).font(.system(size: 10, weight: .medium))
+            Text("asc " + command.arguments.joined(separator: " "))
+                .font(.system(size: 10, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(L("Der Befehl wird erst nach deiner Freigabe ausgeführt.", "The command runs only after your approval."))
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            HStack {
+                Button(L("Ablehnen", "Decline")) { chat.resolve(false) }
+                Spacer()
+                Button(L("Version anlegen", "Create version")) { chat.resolve(true) }
+                    .buttonStyle(.borderedProminent).tint(moss)
+            }.controlSize(.small)
+        }
+        .padding(12)
+        .background(moss.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 9) {
             if let context = chat.contexts[browser.space] {
@@ -406,7 +602,7 @@ struct SpaceChatPanel: View {
                 Spacer()
                 if chat.running {
                     ProgressView().controlSize(.small)
-                    Button(L("Stopp", "Stop")) { chat.cancel() }.buttonStyle(.plain).font(.caption)
+                    Button(L("Stopp", "Stop")) { voice.stopCurrentAction(browser: browser) }.buttonStyle(.plain).font(.caption)
                 } else {
                     Button { chat.send(browser: browser) } label: {
                         Image(systemName: "arrow.up").font(.system(size: 12, weight: .bold)).foregroundStyle(paper)
@@ -440,7 +636,7 @@ struct SpaceChatPanel: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 7) {
-            if !settings { modelDataNotice }
+            modelDataNotice
             Button { sentDetailsExpanded.toggle() } label: {
                 footerHeader(
                     L("Was wird gesendet?", "What is sent?"),
@@ -523,11 +719,11 @@ struct SpaceChatPanel: View {
 
     private var dataDisclosureDetail: String {
         if isLocalModelEndpoint {
-            return L("YoBro sendet bis zu 30 letzte Chat-Nachrichten, Tab-/Notiz-Metadaten, ausgewählten Mail-Kontext und alle vom Agenten abgerufenen Mail-, Seiten- und Notizinhalte nur an den lokalen Endpunkt. Ob die lokale Serversoftware Daten weiterleitet, liegt außerhalb von YoBro.",
-                     "YoBro sends up to 30 recent chat messages, tab/note metadata, selected email context, and all email, page, and note content retrieved by the agent only to the local endpoint. Whether the local server software forwards data is outside YoBro's control.")
+            return L("YoBro ersetzt erkannte E-Mail-Adressen, Zugangsdaten, Telefonnummern und Postadressen vor Modellanfragen durch lokale Platzhalter. Das gilt auch für bis zu 30 letzte Chat-Nachrichten sowie abgerufene Mail-, Seiten- und Notizinhalte. Nicht erkannte private Angaben können weiterhin zum lokalen Endpunkt gelangen; dessen Weiterleitung liegt außerhalb von YoBro.",
+                     "YoBro replaces detected email addresses, credentials, phone numbers and postal addresses with local placeholders before model requests. This also applies to up to 30 recent chat messages and retrieved email, page and note content. Undetected private data may still reach the local endpoint; its forwarding is outside YoBro's control.")
         }
-        return L("Bei jeder Anfrage gehen bis zu 30 letzte Chat-Nachrichten, Tab-/Notiz-Metadaten und ausgewählter Mail-Kontext an \(modelProviderName). Wenn der Agent Mails, Webseiten oder Notizen liest, wird auch der dabei abgerufene Inhalt für die Antwort an \(modelProviderName) gesendet.",
-                 "Each request sends up to 30 recent chat messages, tab/note metadata, and selected email context to \(modelProviderName). When the agent reads email, web pages, or notes, the retrieved content is also sent to \(modelProviderName) to produce the response.")
+        return L("YoBro ersetzt erkannte E-Mail-Adressen, Zugangsdaten, Telefonnummern und Postadressen vor Anfragen an \(modelProviderName) durch lokale Platzhalter und setzt Antworten hier wieder zusammen. Bis zu 30 Chat-Nachrichten, Tab-/Notiz-Metadaten und abgerufene Mail-, Seiten- und Notizinhalte können gesendet werden. Nicht erkannte private Angaben können dabei weiterhin an \(modelProviderName) gelangen.",
+                 "YoBro replaces detected email addresses, credentials, phone numbers and postal addresses with local placeholders before requests to \(modelProviderName), then restores replies locally. Up to 30 chat messages, tab/note metadata and retrieved email, page and note content may be sent. Undetected private data may still reach \(modelProviderName).")
     }
 
     private func footerHeader(_ title: String, icon: String, expanded: Bool) -> some View {

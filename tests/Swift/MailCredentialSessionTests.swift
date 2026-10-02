@@ -7,13 +7,22 @@ final class MailCredentialSessionTests: XCTestCase {
     }
 
     @MainActor
-    func testRemoteImagesDefaultToEnabledAndPreferencePersists() throws {
+    func testRemoteImagesDefaultToDisabledAndPreferencePersists() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: home) }
         let initial = MailStore(home: home)
-        XCTAssertTrue(initial.remoteImagesEnabled)
-        initial.setRemoteImages(false)
+        XCTAssertFalse(initial.remoteImagesEnabled)
+        initial.setRemoteImages(true)
+        XCTAssertTrue(MailStore(home: home).remoteImagesEnabled)
+    }
+
+    @MainActor
+    func testLegacyRemoteImagePreferenceRequiresFreshOptIn() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Data(#"{"remoteImages":true}"#.utf8).write(to: home.appendingPathComponent("mail-preferences.json"))
         XCTAssertFalse(MailStore(home: home).remoteImagesEnabled)
     }
 

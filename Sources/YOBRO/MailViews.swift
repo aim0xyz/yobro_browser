@@ -8,7 +8,6 @@ struct MailWorkspace: View {
     var askAgent: ((MailItem, MailBody, String) -> Void)? = nil
     @State private var showAccount = false
     @State private var editing: MailAccount?
-    @State private var compose = false
     @State private var remove: MailAccount?
     @State private var bodyError: String?
     @State private var plainText = false
@@ -38,7 +37,7 @@ struct MailWorkspace: View {
                 if store.refreshing { ProgressView().controlSize(.small) }
                 Button { MailSecrets.session.retryFailures(); Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }.disabled(store.accounts.isEmpty || store.refreshing).yobroHelp(L("Alle Postfächer aktualisieren"))
                 if compactMail {
-                    Button { compose = true } label: { Image(systemName: "square.and.pencil") }.disabled(store.accounts.isEmpty).yobroHelp(L("Schreiben"))
+                    Button { store.composerPresented = true } label: { Image(systemName: "square.and.pencil") }.disabled(store.accounts.isEmpty).yobroHelp(L("Schreiben"))
                     Menu {
                         Button(store.notificationsEnabled ? L("Mail-Mitteilungen ausschalten") : L("Mail-Mitteilungen einschalten")) { Task { await store.setNotifications(!store.notificationsEnabled) } }
                         Button(L("Postfach verbinden")) { editing = nil; showAccount = true }
@@ -46,7 +45,7 @@ struct MailWorkspace: View {
                 } else {
                     Button { Task { await store.setNotifications(!store.notificationsEnabled) } } label: { Image(systemName: store.notificationsEnabled ? "bell.badge.fill" : "bell.slash") }.yobroHelp(store.notificationsEnabled ? L("Mail-Mitteilungen ausschalten") : L("Mail-Mitteilungen einschalten"))
                     Button { editing = nil; showAccount = true } label: { Image(systemName: "person.badge.plus") }.yobroHelp(L("Postfach verbinden"))
-                    Button { compose = true } label: {
+                    Button { store.composerPresented = true } label: {
                         Label(L("Schreiben"), systemImage: "square.and.pencil")
                             .padding(.horizontal, 11)
                     }
@@ -120,7 +119,7 @@ struct MailWorkspace: View {
         }
         .background(paper).foregroundStyle(ink)
             .sheet(isPresented: $showAccount) { MailAccountEditor(store: store, existing: editing) }
-            .sheet(isPresented: $compose) { MailComposer(store: store) }
+            .sheet(isPresented: $store.composerPresented) { MailComposer(store: store) }
             .overlay {
                 if remove != nil {
                     YOBRODialogOverlay(icon: "person.crop.circle.badge.minus", title: L("Postfach entfernen?"), message: L("Das Konto und sein Passwort werden aus YoBro entfernt. Nachrichten beim Anbieter bleiben erhalten."), confirmTitle: L("Entfernen"), cancelTitle: L("Abbrechen"), destructive: true, confirm: {
@@ -288,7 +287,7 @@ struct MailWorkspace: View {
                                     }
                                 } label: { Label(L("Im Space bearbeiten", "Work in Space"), systemImage: "sparkles") }
                             }
-                            Button { store.reply(item); compose = true } label: { Label(L("Antworten"), systemImage: "arrowshape.turn.up.left") }.buttonStyle(.bordered)
+                            Button { store.reply(item); store.composerPresented = true } label: { Label(L("Antworten"), systemImage: "arrowshape.turn.up.left") }.buttonStyle(.bordered)
                         }
                     }.padding(.horizontal, 20).padding(.top, 16)
                     if let body = store.bodies[item.id] {
@@ -555,7 +554,7 @@ struct MailComposer: View {
             VStack(spacing: 0) {
                 RichTextToolbar(commands: commands).padding(.horizontal, 10).frame(height: 40)
                 Divider().opacity(0.35)
-                RichTextEditor(rtf: store.draftRTF, fallbackText: store.draftText, commands: commands) { rtf, text in
+                RichTextEditor(rtf: store.draftRTF, fallbackText: store.draftText, commands: commands, adaptsEmailTextColor: true) { rtf, text in
                     store.draftRTF = rtf
                     store.draftText = text
                 }

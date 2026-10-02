@@ -42,15 +42,17 @@ struct MailFolder: Identifiable, Decodable {
 struct MailPreferences: Codable {
     var notifications = false
     var knownInbox: [String: Set<String>] = [:]
-    var remoteImages = true
+    var remoteImages = false
+    var remoteImagesApproved = false
 
-    private enum CodingKeys: String, CodingKey { case notifications, knownInbox, remoteImages }
+    private enum CodingKeys: String, CodingKey { case notifications, knownInbox, remoteImages, remoteImagesApproved }
     init() {}
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         notifications = try values.decodeIfPresent(Bool.self, forKey: .notifications) ?? false
         knownInbox = try values.decodeIfPresent([String: Set<String>].self, forKey: .knownInbox) ?? [:]
-        remoteImages = try values.decodeIfPresent(Bool.self, forKey: .remoteImages) ?? true
+        remoteImagesApproved = try values.decodeIfPresent(Bool.self, forKey: .remoteImagesApproved) ?? false
+        remoteImages = (try values.decodeIfPresent(Bool.self, forKey: .remoteImages) ?? false) && remoteImagesApproved
     }
 }
 
@@ -128,7 +130,7 @@ enum MailTransport {
         request["action"] = action; request["password"] = password
         request["account"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(account))
         let payload = try JSONSerialization.data(withJSONObject: request)
-        guard let script = Bundle.main.url(forResource: "MailWorker", withExtension: "py") ?? Bundle.module.url(forResource: "MailWorker", withExtension: "py") else { throw YOBROError.message("Mail-Komponente fehlt.") }
+        guard let script = Bundle.main.url(forResource: "MailWorker", withExtension: "py") ?? YOBROResources.bundle.url(forResource: "MailWorker", withExtension: "py") else { throw YOBROError.message("Mail-Komponente fehlt.") }
         let output = try await Task.detached(priority: .userInitiated) { () throws -> Data in
             let candidates = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
             guard let runtime = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw YOBROError.message(L("Für die Mail-Vorschau wird Python 3 benötigt. Bitte Python 3 installieren.")) }
@@ -162,7 +164,7 @@ final class MailStore: ObservableObject {
     @Published var lockedAccounts: Set<UUID> = []
     @Published var unlockingAccount: UUID?
     @Published var notificationsEnabled = false
-    @Published var remoteImagesEnabled = true
+    @Published var remoteImagesEnabled = false
     @Published var attachmentDownloads: Set<String> = []
     @Published var folderTotals: [String: Int] = [:]
     private var preferences = MailPreferences()
@@ -191,6 +193,7 @@ final class MailStore: ObservableObject {
     @Published var draftText = ""
     @Published var draftRTF: Data?
     @Published var draftReplyID = ""
+    @Published var composerPresented = false
     private let file: URL
 
     typealias Request = (String, MailAccount, [String: Any]) async throws -> [String: Any]
@@ -257,7 +260,9 @@ final class MailStore: ObservableObject {
         notificationsEnabled = enabled; preferences.notifications = enabled; persistPreferences()
     }
     func setRemoteImages(_ enabled: Bool) {
-        remoteImagesEnabled = enabled; preferences.remoteImages = enabled; persistPreferences()
+        remoteImagesEnabled = enabled; preferences.remoteImages = enabled
+        preferences.remoteImagesApproved = enabled
+        persistPreferences()
     }
     func stopPolling() { polling?.cancel(); polling = nil }
 
@@ -398,7 +403,7 @@ final class MailStore: ObservableObject {
         var payload: [String: Any] = ["to": draftTo, "subject": draftSubject, "text": draftText, "replyID": draftReplyID]
         if let draftRTF,
            let attributed = NSAttributedString(rtf: draftRTF, documentAttributes: nil),
-           let htmlData = try? attributed.data(from: NSRange(location: 0, length: attributed.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.html]),
+           let htmlData = try? MailTextColor.contentForExport(attributed).data(from: NSRange(location: 0, length: attributed.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.html]),
            let html = String(data: htmlData, encoding: .utf8) {
             payload["html"] = html
         }

@@ -37,6 +37,19 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertFalse(model.agentUsageActive, "Re-enabling access must not restore stale activity")
     }
 
+    func testClosingAgentSplitKeepsChatPermission() {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
+        _ = model.newAgentTab()
+        model.closeAgentWorkspace()
+        XCTAssertTrue(model.agentEnabled)
+        XCTAssertNil(model.agentTab)
+        XCTAssertFalse(model.agentWorkspaceVisible)
+        XCTAssertTrue(AgentAccessPermission.load(home: home).allowed)
+    }
+
     func testBuiltInChatIndicatesActivityWithoutBrowserTab() {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
@@ -47,5 +60,16 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertNil(model.agentTab)
         model.chat.running = false
         XCTAssertFalse(model.agentUsageActive)
+    }
+
+    func testManualStopCancelsCurrentChat() {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
+        model.chat.running = true
+        model.voice.stopCurrentAction(browser: model)
+        XCTAssertFalse(model.chat.running)
+        XCTAssertTrue(model.agentEnabled)
     }
 }
