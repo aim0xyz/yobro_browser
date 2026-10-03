@@ -17,8 +17,8 @@
   </dict></array>
   <key>CFBundleDisplayName</key><string>YoBro</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.6.8</string>
-  <key>CFBundleVersion</key><string>17</string>
+  <key>CFBundleShortVersionString</key><string>0.6.9</string>
+  <key>CFBundleVersion</key><string>18</string>
   <key>SUFeedURL</key><string>https://github.com/aim0xyz/yobro_browser/releases/latest/download/appcast.xml</string>
   <key>SUPublicEDKey</key><string>OcfqMHnMRN/9IOWHjelQdq/JbDlp4pASExsWQOaL3WQ=</string>
   <key>SUEnableAutomaticChecks</key><true/>
