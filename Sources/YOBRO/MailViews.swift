@@ -134,7 +134,7 @@ struct MailWorkspace: View {
             }
             .onChange(of: store.selectedAccount) { _, _ in endSelection() }
             .onChange(of: store.selectedFolder) { _, _ in endSelection() }
-            .task {
+            .appearanceTask {
                 if ProcessInfo.processInfo.environment["YOBRO_DEV_CAPTURE"] == "1", ProcessInfo.processInfo.environment["YOBRO_MAIL_SETUP_PREVIEW"] != nil { showAccount = true }
                 if !store.accounts.isEmpty { await store.refresh() }
             }
@@ -333,7 +333,7 @@ struct MailWorkspace: View {
                         Button(L("Erneut laden")) { Task { bodyError = nil; do { try await store.load(item) } catch { bodyError = error.localizedDescription } } }.padding(.horizontal, 20)
                         Spacer()
                     } else { ProgressView(L("Nachricht laden …")).padding(20); Spacer() }
-                }.task(id: item.id) {
+                }.appearanceTask(id: item.id) {
                     bodyError = nil; plainText = false
                     do { try await store.load(item) } catch { if store.selectedID == item.id { bodyError = error.localizedDescription } }
                 }

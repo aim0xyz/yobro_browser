@@ -139,6 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag, let window = sender.windows.first(where: { $0.canBecomeMain }) {
             window.makeKeyAndOrderFront(nil)
+            // We handled the reopen. Returning true also asks SwiftUI to open
+            // an untitled WindowGroup, potentially recreating the view graph.
+            return false
         }
         return true
     }

@@ -78,7 +78,7 @@ struct PageToolsButton: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .padding(16).frame(width: 330).background(paper).foregroundStyle(ink)
-            .task { await inspector.inspect(tab.webView) }
+            .appearanceTask { await inspector.inspect(tab.webView) }
         }
     }
 }

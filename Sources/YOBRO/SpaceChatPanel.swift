@@ -117,7 +117,7 @@ struct SpaceChatPanel: View {
                     }
                     .frame(width: 380, height: 540)
                     .background(YOBROTheme.chromeBottom)
-                    .task {
+                    .appearanceTask {
                         if ChatProviderPreset.matching(chat.connection.endpoint) == .openRouter,
                            !chat.apiKey.isEmpty, chat.openRouterModels.isEmpty {
                             await chat.loadOpenRouterModels()

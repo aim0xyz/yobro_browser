@@ -82,7 +82,7 @@ private struct WebPageDialogOverlay: View {
                 }
             }
         }
-        .task {
+        .appearanceTask {
             text = dialog.defaultText
             await Task.yield()
             focused = dialog.kind == .prompt || dialog.kind == .credentials
@@ -345,7 +345,7 @@ struct BrowserShell: View {
         .environment(\.locale, YOBROLanguage.locale)
         .animation(.easeInOut(duration: 0.2), value: model.showAgent)
         .animation(.easeInOut(duration: 0.2), value: model.showSidebar)
-        .task {
+        .appearanceTask {
             if Bundle.main.bundleIdentifier == "local.yobro.browser" {
                 await model.voice.resumeIfEnabled(browser: model)
             }
@@ -886,7 +886,7 @@ private struct ClosedTabUndo: View {
         .background(.regularMaterial, in: Capsule())
         .overlay { Capsule().stroke(YOBROTheme.border.opacity(0.7), lineWidth: 1) }
         .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
-        .task(id: undoID) {
+        .appearanceTask(id: undoID) {
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             guard !Task.isCancelled else { return }
             model.dismissClosedTabUndo(undoID)
@@ -1359,7 +1359,7 @@ struct SidebarNavigation: View {
     var body: some View {
         addressBar
         .buttonStyle(YOBROButtonStyle()).font(.system(size: 12))
-        .task(id: tab.id) {
+        .appearanceTask(id: tab.id) {
             editingAddress = false
             showingActions = false
             presentRequestedAddress()
@@ -1645,7 +1645,7 @@ struct AddressEntry: View {
                 Button(L("Öffnen")) { openSelectedSuggestion() }.keyboardShortcut(.defaultAction).disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }.font(.system(size: 12))
         }.padding(20).frame(width: 500).background(paper)
-            .task(id: tab.id) {
+            .appearanceTask(id: tab.id) {
                 address = tab.url
                 focused = false
                 await Task.yield()
@@ -1758,7 +1758,7 @@ struct NewTabPage: View {
             .background(YOBROTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(YOBROTheme.border.opacity(0.45)))
             .shadow(color: .black.opacity(0.10), radius: 24, y: 10)
-            .task(id: tab?.id) { await Task.yield(); focused = true }
+            .appearanceTask(id: tab?.id) { await Task.yield(); focused = true }
             .onChange(of: model.focusAddress) { _, requested in
                 guard requested else { return }
                 focused = true

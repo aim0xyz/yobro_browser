@@ -700,7 +700,7 @@ struct BrowserImportView: View {
                 Button(L("Auswahl importieren (\(store.selectedCount))", "Import selection (\(store.selectedCount))")) { confirming = true }.buttonStyle(.borderedProminent).tint(moss).disabled(store.selectedCount == 0 || store.busy)
             }
         }.frame(minHeight: 0, maxHeight: .infinity)
-        .task { await store.discover() }
+        .appearanceTask { await store.discover() }
         .onChange(of: store.browser) { _, _ in primaryPassword = ""; store.resetSource() }
         .onChange(of: store.profileID) { _, _ in primaryPassword = "" }
         .onDisappear { primaryPassword = "" }

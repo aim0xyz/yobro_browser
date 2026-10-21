@@ -263,7 +263,7 @@ struct PageFindBar: View {
             .background(paper, in: RoundedRectangle(cornerRadius: 11)).shadow(color: .black.opacity(0.12), radius: 16, y: 6)
             .onAppear { query = tab.findQuery; focused = true }
             .onChange(of: tab.findQuery) { _, value in query = value }
-            .task(id: query) {
+            .appearanceTask(id: query) {
                 try? await Task.sleep(nanoseconds: 180_000_000)
                 if !Task.isCancelled && query != tab.findQuery { await tab.find(query) }
             }
