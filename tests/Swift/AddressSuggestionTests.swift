@@ -47,4 +47,37 @@ final class AddressSuggestionTests: XCTestCase {
 
         XCTAssertEqual(suggestions.first?.url, "https://example.com/")
     }
+
+    @MainActor
+    func testAddressSuggestionsStayFastWithALargeHistory() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let browser = BrowserModel(root: home)
+        let now = Date()
+        browser.history = (0..<5_000).map { index in
+            HistoryEntry(title: "Example page \(index)", url: "https://site\(index % 400).example.com/docs/\(index)",
+                         date: now.addingTimeInterval(Double(-index) * 60), visits: index % 7 + 1)
+        }
+
+        XCTAssertEqual(browser.addressSuggestions("e").count, 6)
+        // Keeping only the best rows must rank exactly like a full sort.
+        XCTAssertEqual(browser.addressSuggestions("e").map(\.id), browser.addressSuggestions("e", limit: 40).prefix(6).map(\.id))
+        let elapsed = ContinuousClock().measure { _ = browser.addressSuggestions("e") }
+        XCTAssertLessThan(elapsed, .milliseconds(50))
+        measure { _ = browser.addressSuggestions("e") }
+    }
+
+    @MainActor
+    func testRemovingOneHistoryEntryKeepsTheRest() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let browser = BrowserModel(root: home)
+        let keep = HistoryEntry(title: "Keep", url: "https://keep.example/")
+        let drop = HistoryEntry(title: "Drop", url: "https://drop.example/")
+        browser.history = [keep, drop]
+
+        browser.removeHistory(drop)
+
+        XCTAssertEqual(browser.history.map(\.id), [keep.id])
+    }
 }

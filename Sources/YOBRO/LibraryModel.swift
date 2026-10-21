@@ -54,6 +54,8 @@ final class DownloadStore: NSObject, ObservableObject, WKDownloadDelegate {
     private let defaultDirectory: URL
     private var tasks: [UUID: WKDownload] = [:]
     private var observations: [UUID: NSKeyValueObservation] = [:]
+    /// Downloads from private tabs: listed while YoBro runs, never saved.
+    private var ephemeralIDs: Set<UUID> = []
 
     init(home: URL, isolated: Bool) {
         storage = home.appendingPathComponent("downloads.json")
@@ -77,6 +79,8 @@ final class DownloadStore: NSObject, ObservableObject, WKDownloadDelegate {
         }
     }
     var activeCount: Int { entries.filter { $0.state == "downloading" }.count }
+    /// The entries written to downloads.json.
+    var persistentEntries: [DownloadEntry] { entries.filter { !ephemeralIDs.contains($0.id) } }
     var activeEntries: [DownloadEntry] { entries.filter { $0.state == "downloading" } }
     var usesDefaultDirectory: Bool { directory.standardizedFileURL.path == defaultDirectory.standardizedFileURL.path }
 
@@ -108,18 +112,23 @@ final class DownloadStore: NSObject, ObservableObject, WKDownloadDelegate {
         body(&entries[index])
     }
     private func persist() {
-        do { try JSONEncoder().encode(entries).write(to: storage, options: .atomic) }
+        do { try JSONEncoder().encode(persistentEntries).write(to: storage, options: .atomic) }
         catch { NSLog("YoBro download history could not be saved: %@", error.localizedDescription) }
     }
     func track(_ download: WKDownload) {
         guard identifier(download) == nil else { return }
         let entry = DownloadEntry(source: download.originalRequest?.url?.absoluteString ?? "")
-        entries.insert(entry, at: 0); tasks[entry.id] = download
+        tasks[entry.id] = download
         download.delegate = self
         observations[entry.id] = download.progress.observe(\.completedUnitCount, options: [.new]) { [weak self] progress, _ in
             let received = progress.completedUnitCount, expected = progress.totalUnitCount
             Task { @MainActor in self?.update(entry.id) { $0.received = received; $0.expected = expected } }
         }
+        register(entry, ephemeral: (download.webView as? AppearanceWebView)?.tab?.isPrivate == true)
+    }
+    func register(_ entry: DownloadEntry, ephemeral: Bool) {
+        if ephemeral { ephemeralIDs.insert(entry.id) }
+        entries.insert(entry, at: 0)
         persist()
     }
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
@@ -171,6 +180,23 @@ final class DownloadStore: NSObject, ObservableObject, WKDownloadDelegate {
         guard item.state == "completed", let path = item.path else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
+    func open(_ item: DownloadEntry) {
+        guard item.state == "completed", let path = item.path, FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+    /// Removes the row only; the downloaded file stays. A running download
+    /// has to be cancelled first.
+    func remove(_ id: UUID) {
+        guard let item = entries.first(where: { $0.id == id }), item.state != "downloading" else { return }
+        entries.removeAll { $0.id == id }
+        ephemeralIDs.remove(id)
+        persist()
+    }
+    func clearFinished() {
+        entries.removeAll { $0.state != "downloading" }
+        ephemeralIDs.formIntersection(entries.map(\.id))
+        persist()
+    }
 }
 
 private struct DownloadPreferences: Codable {
@@ -220,34 +246,37 @@ extension BrowserModel {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return history.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.url.localizedCaseInsensitiveContains(query) }
     }
+    /// Suggestions rank only the newest entries, so typing stays instant
+    /// with a large imported history.
+    static let suggestionScanLimit = 5_000
+
     func addressSuggestions(_ query: String, limit: Int = 6) -> [HistoryEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return [] }
-        let candidates = history.compactMap { entry -> (HistoryEntry, URL, String)? in
-            guard let url = URL(string: entry.url), let rawHost = url.host?.lowercased(), rawHost != "accounts.google.com" else { return nil }
+        guard !needle.isEmpty, limit > 0 else { return [] }
+        // One pass parses every URL once and gathers both the per-host visits
+        // and the matching entries. `history` is kept newest first.
+        var hostVisits: [String: Int] = [:]
+        var candidates: [(entry: HistoryEntry, url: URL, host: String, title: String)] = []
+        for entry in history.prefix(Self.suggestionScanLimit) {
+            guard let url = URL(string: entry.url), let rawHost = url.host?.lowercased(), rawHost != "accounts.google.com" else { continue }
             let host = rawHost.hasPrefix("www.") ? String(rawHost.dropFirst(4)) : rawHost
+            hostVisits[host, default: 0] += entry.visits
             let title = entry.title.lowercased()
-            guard title.contains(needle) || entry.url.lowercased().contains(needle) || host.contains(needle) else { return nil }
-            return (entry, url, host)
+            guard title.contains(needle) || host.contains(needle) || entry.url.lowercased().contains(needle) else { continue }
+            candidates.append((entry, url, host, title))
         }
-        let hostVisits = Dictionary(grouping: history.compactMap { entry -> (String, Int)? in
-            guard let rawHost = URL(string: entry.url)?.host?.lowercased(), rawHost != "accounts.google.com" else { return nil }
-            return (rawHost.hasPrefix("www.") ? String(rawHost.dropFirst(4)) : rawHost, entry.visits)
-        }, by: \.0).mapValues { $0.reduce(0) { $0 + $1.1 } }
         let now = Date()
 
-        func score(_ candidate: (HistoryEntry, URL, String)) -> Int {
-            let (entry, url, host) = candidate
-            let title = entry.title.lowercased()
-            let words = title.split { !$0.isLetter && !$0.isNumber }.map(String.init)
-            let pathParts = url.pathComponents.map { $0.lowercased() }
+        func score(_ candidate: (entry: HistoryEntry, url: URL, host: String, title: String)) -> Int {
+            let (entry, url, host, title) = candidate
+            // Later tiers are only computed when the earlier ones miss.
             let match: Int
             if host == needle { match = 1_200 }
             else if host.hasPrefix(needle) { match = 900 }
             else if title.hasPrefix(needle) { match = 760 }
-            else if words.contains(where: { $0.hasPrefix(needle) }) { match = 700 }
+            else if title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains(where: { $0.hasPrefix(needle) }) { match = 700 }
             else if host.contains(needle) { match = 560 }
-            else if pathParts.contains(where: { $0.hasPrefix(needle) }) { match = 500 }
+            else if url.pathComponents.contains(where: { $0.lowercased().hasPrefix(needle) }) { match = 500 }
             else if title.contains(needle) { match = 440 }
             else { match = 350 }
 
@@ -261,12 +290,22 @@ extension BrowserModel {
             return match + popularity + homepage + recency
         }
 
-        return candidates.sorted { lhs, rhs in
-            let lhsScore = score(lhs), rhsScore = score(rhs)
-            if lhsScore != rhsScore { return lhsScore > rhsScore }
-            if lhs.0.visits != rhs.0.visits { return lhs.0.visits > rhs.0.visits }
-            return lhs.0.date > rhs.0.date
-        }.prefix(max(0, limit)).map(\.0)
+        // Keep only the best `limit` rows instead of sorting every match.
+        // Ties keep history order, as the stable sort did before.
+        func ranksAbove(_ lhs: (entry: HistoryEntry, score: Int), _ rhs: (entry: HistoryEntry, score: Int)) -> Bool {
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            if lhs.entry.visits != rhs.entry.visits { return lhs.entry.visits > rhs.entry.visits }
+            return lhs.entry.date > rhs.entry.date
+        }
+        var top: [(entry: HistoryEntry, score: Int)] = []
+        top.reserveCapacity(limit + 1)
+        for candidate in candidates {
+            let ranked = (entry: candidate.entry, score: score(candidate))
+            if top.count == limit, let last = top.last, !ranksAbove(ranked, last) { continue }
+            top.insert(ranked, at: top.firstIndex { ranksAbove(ranked, $0) } ?? top.count)
+            if top.count > limit { top.removeLast() }
+        }
+        return top.map(\.entry)
     }
     func updateVisitTitle(_ tab: BrowserTab) {
         guard !tab.isPrivate else { return }
@@ -275,7 +314,15 @@ extension BrowserModel {
               let index = history.firstIndex(where: { $0.url == safeURL }), history[index].title != title else { return }
         history[index].title = title; saveLibrary()
     }
-    func clearHistory() { history = []; flushLibrary() }
+    /// Closed tabs keep URLs and back-forward lists of their own, so they go too.
+    func clearHistory() {
+        history = []; flushLibrary()
+        closedTabs.removeAll(); clearClosedTabUndo(); persistSession()
+    }
+    func removeHistory(_ entry: HistoryEntry) {
+        history.removeAll { $0.id == entry.id }
+        flushLibrary()
+    }
 
     /// Schedules a history write.
     ///
@@ -344,6 +391,8 @@ extension BrowserModel {
     }
     func moveTab(_ id: UUID, relativeTo target: UUID, after: Bool) -> Bool {
         guard id != target, let source = tabs.first(where: { $0.id == id }), let destination = tabs.first(where: { $0.id == target }), source.space == destination.space else { return false }
+        // Pins and folders are saved with the session; a private tab never is.
+        guard !source.isPrivate || (!destination.pinned && destination.folderID == nil) else { return false }
         tabs.removeAll { $0.id == id }
         guard let targetIndex = tabs.firstIndex(where: { $0.id == target }) else { return false }
         source.pinned = destination.pinned

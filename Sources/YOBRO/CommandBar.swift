@@ -23,15 +23,27 @@ struct CommandSuggestion: Identifiable, Equatable {
     var tabID: UUID? { if case .tab(let id) = action { return id }; return nil }
 }
 
+private extension Notification.Name {
+    /// Sent with the model as object; the inline field of a blank tab takes focus.
+    static let focusInlineCommandField = Notification.Name("YOBRO.focusInlineCommandField")
+}
+
 extension BrowserModel {
     /// Opens the address field. ⌘L on the start page has no page to replace,
-    /// so it behaves like ⌘T.
+    /// so it behaves like ⌘T. A blank tab already shows the field inline, so
+    /// that one takes focus instead of a second field opening over it.
     func openCommandBar(_ mode: CommandBarMode) {
+        closePeek()
+        if let active, active.url.isEmpty {
+            NotificationCenter.default.post(name: .focusInlineCommandField, object: self)
+            return
+        }
         commandBar = mode == .current && (active?.url.isEmpty ?? true) ? .newTab : mode
     }
 
-    /// What the address field offers: the typed text first, then open tabs,
-    /// history and bookmarks. With nothing typed it lists recent tabs of this
+    /// What the address field offers: a visited site whose host completes the
+    /// typed text, the typed text itself, then open tabs, history and
+    /// bookmarks. With nothing typed it lists recent tabs of this
     /// Space and the last closed tab, so ⌘T doubles as a tab switcher.
     func commandSuggestions(_ query: String) -> [CommandSuggestion] {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -47,16 +59,30 @@ extension BrowserModel {
             }
             return result
         }
+        let ranked = addressSuggestions(term, limit: 8)
+        let topHit = term.count >= 2 && !term.contains(" ") && !term.contains("://") ? ranked.first { entry in
+            // Like a browser's autocompletion: "git" offers github.com
+            // above the search, but typing the whole host does not.
+            guard let host = URL(string: entry.url)?.host?.lowercased() else { return false }
+            let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            return bare.hasPrefix(term.lowercased()) && bare != term.lowercased()
+        } : nil
+        let topHitTab = topHit.flatMap { entry in userTabs.first { $0.url == entry.url } }
+        if let topHit {
+            result.append(CommandSuggestion(id: "top", section: "", title: topHit.title,
+                                            detail: URL(string: topHit.url)?.host ?? topHit.url, symbol: "arrow.up.right",
+                                            action: topHitTab.map { .tab($0.id) } ?? .go(topHit.url)))
+        }
         let looksLikeAddress = !term.contains(" ") && (term.contains(".") || term.contains("://") || term.hasPrefix("localhost"))
         result.append(CommandSuggestion(
             id: "go", section: "",
             title: term,
-            detail: looksLikeAddress ? L("Öffnen", "Open") : L("Mit DuckDuckGo suchen", "Search with DuckDuckGo"),
+            detail: looksLikeAddress ? L("Öffnen", "Open") : L("Mit \(SearchEngine.current.name) suchen", "Search with \(SearchEngine.current.name)"),
             symbol: looksLikeAddress ? "globe" : "magnifyingglass", action: .go(term)))
-        let matchingTabs = userTabs.filter { $0.sidebarTitle.localizedCaseInsensitiveContains(term) || $0.url.localizedCaseInsensitiveContains(term) }.prefix(4)
+        let matchingTabs = userTabs.filter { $0.id != topHitTab?.id && ($0.sidebarTitle.localizedCaseInsensitiveContains(term) || $0.url.localizedCaseInsensitiveContains(term)) }.prefix(4)
         result += matchingTabs.map(tabSuggestion)
         let open = Set(tabs.map(\.url))
-        result += addressSuggestions(term, limit: 5).filter { !open.contains($0.url) }.map { entry in
+        result += ranked.prefix(5).filter { !open.contains($0.url) && $0.url != topHit?.url }.map { entry in
             CommandSuggestion(id: "h-\(entry.id)", section: L("Verlauf", "History"), title: entry.title,
                               detail: URL(string: entry.url)?.host ?? entry.url, symbol: "clock", action: .go(entry.url))
         }
@@ -85,6 +111,9 @@ extension BrowserModel {
         case .reopen:
             _ = reopenTab()
         case .go(let text):
+            // Check first, so an address YoBro cannot open never leaves an
+            // empty new tab behind.
+            do { _ = try BrowserTab.resolveAddress(text) } catch { notice = error.localizedDescription; return }
             if let active, mode == .current || active.url.isEmpty {
                 do { try active.navigate(text) } catch { notice = error.localizedDescription }
             } else {
@@ -102,10 +131,14 @@ struct CommandBar: View {
     var inline = false
     @State private var query = ""
     @State private var selected = 0
+    /// The suggestions are computed once per query, not on every redraw.
+    @State private var list: [CommandSuggestion] = []
+    /// Whether each row starts a new section and shows its heading.
+    @State private var headings: [Bool] = []
+    @State private var listQuery: String?
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    private var suggestions: [CommandSuggestion] { model.commandSuggestions(query) }
     private var isPrivate: Bool { model.active?.isPrivate == true && (mode == .current || model.active?.url.isEmpty == true) }
 
     var body: some View {
@@ -121,24 +154,29 @@ struct CommandBar: View {
                     .accessibilityIdentifier("command-bar-field")
             }
             .padding(.horizontal, 16).frame(height: 58)
-            if !suggestions.isEmpty {
+            if !list.isEmpty {
                 ScrollViewReader { reader in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                                if !suggestion.section.isEmpty && (index == 0 || suggestions[index - 1].section != suggestion.section) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { index, suggestion in
+                                if index < headings.count && headings[index] {
                                     Text(suggestion.section)
                                         .font(.system(size: 12)).foregroundStyle(ink.opacity(0.45))
                                         .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 6)
+                                        .accessibilityAddTraits(.isHeader)
                                 }
-                                row(suggestion, highlighted: index == selected).id(index)
-                                    .onTapGesture { selected = index; run() }
+                                Button { selected = index; run() } label: { row(suggestion, highlighted: index == selected) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel(spokenLabel(suggestion))
+                                    .accessibilityAddTraits(index == selected ? .isSelected : [])
+                                    .id(index)
                             }
                         }
                         .padding(.horizontal, 8).padding(.bottom, 8)
                     }
                     .scrollIndicators(.hidden)
-                    .frame(height: min(listHeight, inline ? 300 : 380))
+                    .frame(height: min(listHeight(list), inline ? 300 : 380))
                     .onChange(of: selected) { _, value in reader.scrollTo(value) }
                 }
             }
@@ -149,27 +187,66 @@ struct CommandBar: View {
         .shadow(color: .black.opacity(inline ? 0.08 : 0.28), radius: inline ? 14 : 35, y: inline ? 6 : 18)
         .foregroundStyle(ink)
         .appearanceTask {
-            if mode == .current, let url = model.active?.url, !url.isEmpty { query = url }
+            if mode == .current, let url = model.active?.url, !url.isEmpty { query = url; refresh() }
             selected = 0
             await Task.yield()
             focused = true
             await Task.yield()
             if !query.isEmpty { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }
         }
+        .appearanceTask(id: query) {
+            // Typing quickly ranks the history once for the last keystroke.
+            if !query.isEmpty { try? await Task.sleep(nanoseconds: 60_000_000) }
+            guard !Task.isCancelled else { return }
+            refresh()
+        }
+        // The empty field lists open tabs. Not `onReceive(model.$tabs)`: it
+        // resubscribes on every redraw and replays the value, so each refresh
+        // caused the next one and a blank tab kept the main thread busy.
+        .onChange(of: model.tabs.map(\.id)) { _, _ in if query.isEmpty { refresh() } }
+        .onReceive(NotificationCenter.default.publisher(for: .focusInlineCommandField, object: model)) { _ in
+            guard inline else { return }
+            focused = true
+            Task { @MainActor in
+                await Task.yield()
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+            }
+        }
         .onChange(of: query) { _, _ in selected = 0 }
-        .onKeyPress(.downArrow) { selected = min(selected + 1, max(0, suggestions.count - 1)); return .handled }
-        .onKeyPress(.upArrow) { selected = max(0, selected - 1); return .handled }
+        .onKeyPress(.downArrow) { move(1); return .handled }
+        .onKeyPress(.upArrow) { move(-1); return .handled }
         .onExitCommand { if !inline { model.commandBar = nil } }
+    }
+
+    private func refresh() {
+        let suggestions = model.commandSuggestions(query)
+        list = suggestions
+        headings = suggestions.indices.map { index in
+            !suggestions[index].section.isEmpty && (index == 0 || suggestions[index - 1].section != suggestions[index].section)
+        }
+        listQuery = query
+        selected = min(selected, max(0, suggestions.count - 1))
+    }
+
+    /// Moves the highlight and tells VoiceOver which row it reached, since
+    /// focus stays in the text field.
+    private func move(_ delta: Int) {
+        if listQuery != query { refresh() }
+        guard !list.isEmpty else { return }
+        let next = min(max(0, selected + delta), list.count - 1)
+        guard next != selected else { return }
+        selected = next
+        AccessibilityNotification.Announcement(spokenLabel(list[next])).post()
+    }
+
+    private func spokenLabel(_ suggestion: CommandSuggestion) -> String {
+        suggestion.detail.isEmpty ? suggestion.title : "\(suggestion.title), \(suggestion.detail)"
     }
 
     /// A ScrollView takes all the height it is offered, so size it to its
     /// rows: 38 pt each, plus each section heading and the bottom inset.
-    private var listHeight: CGFloat {
-        let list = suggestions
-        let headings = list.indices.filter { index in
-            !list[index].section.isEmpty && (index == 0 || list[index - 1].section != list[index].section)
-        }.count
-        return CGFloat(list.count) * 38 + CGFloat(headings) * 32 + 8
+    private func listHeight(_ list: [CommandSuggestion]) -> CGFloat {
+        CGFloat(list.count) * 38 + CGFloat(headings.filter { $0 }.count) * 32 + 8
     }
 
     private var boxFill: Color {
@@ -198,7 +275,8 @@ struct CommandBar: View {
     }
 
     private func run() {
-        let list = suggestions
+        // Return can arrive before the debounced refresh for the last keystroke.
+        if listQuery != query { refresh() }
         if list.indices.contains(selected) {
             model.perform(list[selected], mode: mode)
         } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

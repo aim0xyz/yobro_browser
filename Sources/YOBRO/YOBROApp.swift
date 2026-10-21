@@ -8,7 +8,9 @@ struct YOBROApp: App {
     private var browser: BrowserModel { profiles.browser }
 
     var body: some Scene {
-        WindowGroup("YoBro", id: "main") {
+        // A single window: a WindowGroup opened a second, empty window for
+        // links from other apps and offered macOS window tabs.
+        Window("YoBro", id: "main") {
             BrowserShell(model: browser)
                 .id(profiles.registry.activeID)
                 .frame(minWidth: 960, minHeight: 640)
@@ -35,45 +37,68 @@ struct YOBROApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button(L("Neuer Tab")) { browser.openCommandBar(.newTab) }.keyboardShortcut("t")
-                Button(L("Neuer privater Tab", "New private tab")) { browser.requestPrivateTab() }.keyboardShortcut("t", modifiers: [.command, .shift])
-                Button(L("Tab schließen")) { browser.closeSidebarTab(browser.activeID) }.keyboardShortcut("w")
-                Button(L("Geschlossenen Tab wieder öffnen")) { browser.reopenTab() }.disabled(browser.closedTabs.isEmpty)
+                Button(L("Neuer privater Tab", "New private tab")) { browser.requestPrivateTab() }.keyboardShortcut("n", modifiers: [.command, .shift])
+                Button(L("Tab schließen")) {
+                    // A Peek closes first; with no tab left, ⌘W closes the window.
+                    if browser.peekTab != nil { browser.closePeek() }
+                    else if browser.activeID == nil { NSApp.keyWindow?.performClose(nil) }
+                    else { browser.closeSidebarTab(browser.activeID) }
+                }.keyboardShortcut("w")
+                Button(L("Geschlossenen Tab wieder öffnen")) { browser.reopenTab() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift]).disabled(browser.closedTabs.isEmpty)
+            }
+            // Replaces the system "Close" item, which also claimed ⌘W.
+            CommandGroup(replacing: .saveItem) {
+                Button(L("Fenster schließen", "Close window")) { NSApp.keyWindow?.performClose(nil) }.keyboardShortcut("w", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .appSettings) {
-                Button(L("Einstellungen …")) { browser.showSettings = true }.keyboardShortcut(",")
+                Button(L("Einstellungen …")) { openSettings(L("Allgemein", "General")) }.keyboardShortcut(",")
             }
             CommandMenu("Browser") {
                 Button(L("Einrichtung erneut öffnen …")) { browser.showOnboarding = true }
-                Button(L("Erweiterungen und Datenimport …")) { browser.showSettings = true }
-                Button(browser.showSidebar ? L("Seitenleiste einklappen") : L("Seitenleiste einblenden")) { browser.showSidebar.toggle() }.keyboardShortcut("s", modifiers: [.command])
+                Button(L("Erweiterungen …", "Extensions …")) { openSettings(L("Erweiterungen")) }
+                Button(L("Browserdaten importieren …", "Import browser data …")) { openSettings(L("Daten importieren")) }
+                Button(sidebarToggleTitle) { browser.showSidebar.toggle() }.keyboardShortcut("s", modifiers: [.command])
                 Button(browser.tabsOnTop ? L("Tabs in der Seitenleiste", "Tabs in the sidebar") : L("Tabs oben anzeigen", "Show tabs on top")) { browser.tabsOnTop.toggle() }.keyboardShortcut("s", modifiers: [.command, .option])
                 Button(L("Adresse öffnen")) { browser.openCommandBar(.current) }.keyboardShortcut("l")
                 Button(L("Schnellsuche")) { browser.openCommandBar(.newTab) }.keyboardShortcut("k")
                 Button(L("Nach Updates suchen …", "Check for Updates…")) { browser.updates.installAvailableUpdate() }
                     .disabled(!browser.updates.isConfigured)
-                Button(L("Auf Seite suchen")) { browser.active?.showFind = true }.keyboardShortcut("f").disabled(browser.active?.url.isEmpty != false)
-                Button(L("Nächster Treffer")) { if let tab = browser.active { Task { await tab.find(tab.findQuery) } } }.keyboardShortcut("g")
-                Button(L("Vorheriger Treffer")) { if let tab = browser.active { Task { await tab.find(tab.findQuery, backwards: true) } } }.keyboardShortcut("g", modifiers: [.command, .shift])
+                // Page commands act on the Peek while it is open.
+                Button(L("Auf Seite suchen")) { browser.commandTarget?.requestFind() }.keyboardShortcut("f").disabled(browser.commandTarget?.url.isEmpty != false)
+                Button(L("Nächster Treffer")) { if let tab = browser.commandTarget { Task { await tab.find(tab.findQuery) } } }
+                    .keyboardShortcut("g").disabled(browser.commandTarget == nil)
+                Button(L("Vorheriger Treffer")) { if let tab = browser.commandTarget { Task { await tab.find(tab.findQuery, backwards: true) } } }
+                    .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(browser.commandTarget == nil)
                 Button(L("Verlauf")) { browser.librarySection = .history }.keyboardShortcut("y")
                 Button("Downloads") { browser.librarySection = .downloads }.keyboardShortcut("j", modifiers: [.command, .shift])
-                Button(L("Neu laden")) { browser.active?.webView.reload() }.keyboardShortcut("r")
-                Button(L("Zurück")) { browser.active?.webView.goBack() }.keyboardShortcut("[", modifiers: .command)
-                Button(L("Vorwärts")) { browser.active?.webView.goForward() }.keyboardShortcut("]", modifiers: .command)
+                Button(L("Neu laden")) { browser.commandTarget?.webView.reload() }.keyboardShortcut("r").disabled(browser.commandTarget == nil)
+                Button(L("Zurück")) { browser.commandTarget?.webView.goBack() }.keyboardShortcut("[", modifiers: .command).disabled(browser.commandTarget == nil)
+                Button(L("Vorwärts")) { browser.commandTarget?.webView.goForward() }.keyboardShortcut("]", modifiers: .command).disabled(browser.commandTarget == nil)
+                Button(L("Link kopieren", "Copy link")) { browser.copyLink(browser.commandTarget) }
+                    .keyboardShortcut("c", modifiers: [.command, .shift]).disabled(browser.commandTarget?.url.isEmpty != false)
                 Divider()
                 Button(L("Seite vergrößern", "Zoom in")) { browser.changeZoom(1) }
-                    .keyboardShortcut("+", modifiers: .command).disabled(browser.active == nil)
+                    .keyboardShortcut("+", modifiers: .command).disabled(browser.commandTarget == nil)
                 Button(L("Seite verkleinern", "Zoom out")) { browser.changeZoom(-1) }
-                    .keyboardShortcut("-", modifiers: .command).disabled(browser.active == nil)
+                    .keyboardShortcut("-", modifiers: .command).disabled(browser.commandTarget == nil)
                 Button(L("Originalgröße", "Actual size")) { browser.changeZoom(0) }
-                    .keyboardShortcut("0", modifiers: .command).disabled(browser.active == nil)
+                    .keyboardShortcut("0", modifiers: .command).disabled(browser.commandTarget == nil)
                 Button(L("Seite drucken …", "Print page …")) { browser.printActivePage() }
-                    .keyboardShortcut("p", modifiers: .command).disabled(browser.active?.url.isEmpty != false)
+                    .keyboardShortcut("p", modifiers: .command).disabled(browser.commandTarget?.url.isEmpty != false)
                 Button(L("Seite merken", "Bookmark page")) { browser.bookmarkActivePage() }
-                    .keyboardShortcut("d", modifiers: .command).disabled(browser.active?.url.isEmpty != false)
+                    .keyboardShortcut("d", modifiers: .command).disabled(browser.commandTarget?.url.isEmpty != false)
                 Button(L("Lesezeichen", "Bookmarks")) { browser.librarySection = .bookmarks }
                     .keyboardShortcut("b", modifiers: [.command, .option])
                 Button(L("Assistent", "Assistant")) { browser.showAgent.toggle() }.keyboardShortcut("a", modifiers: [.command, .shift])
-                Button(L("Geteilte Ansicht")) { browser.toggleSplit() }.keyboardShortcut("s", modifiers: [.command, .shift])
+                Button(L("Kontrollzentrum", "Control Center")) { browser.showControlCenter = true }.keyboardShortcut("p", modifiers: [.command, .option])
+                Button(L("Splitview", "Split view")) { browser.toggleSplit() }.keyboardShortcut("s", modifiers: [.command, .shift])
+                Divider()
+                // ⌃⇥ and ⌃⇧⇥ do the same; see AppDelegate.
+                Button(L("Nächster Tab", "Next tab")) { browser.selectAdjacentTab(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
+                Button(L("Vorheriger Tab", "Previous tab")) { browser.selectAdjacentTab(-1) }.keyboardShortcut("[", modifiers: [.command, .shift])
+                Button(L("Nächster Space", "Next space")) { browser.cycleSpace(1) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                Button(L("Vorheriger Space", "Previous space")) { browser.cycleSpace(-1) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
                 Divider()
                 // ⌘1–⌘9 for switching tabs was missing entirely.
                 ForEach(1...9, id: \.self) { number in
@@ -87,10 +112,22 @@ struct YOBROApp: App {
             }
         }
     }
+
+    /// In the tabs-on-top layout ⌘S shows and hides the tab strip.
+    private var sidebarToggleTitle: String {
+        if browser.tabsOnTop { return browser.showSidebar ? L("Tableiste ausblenden", "Hide tab bar") : L("Tableiste einblenden", "Show tab bar") }
+        return browser.showSidebar ? L("Seitenleiste einklappen") : L("Seitenleiste einblenden")
+    }
+
+    private func openSettings(_ section: String) {
+        browser.settingsSection = section
+        browser.showSettings = true
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var browser: BrowserModel?
+    private var tabKeyMonitor: Any?
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Test only: never change the user's global macOS appearance.
         if ProcessInfo.processInfo.environment["YOBRO_DEV_CAPTURE"] == "1",
@@ -99,8 +136,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // YoBro has its own tabs; macOS window tabs only added "Show Tab Bar".
+        NSWindow.allowsAutomaticWindowTabbing = false
+        // A menu item has one shortcut, and the tab items already use ⇧⌘] and ⇧⌘[.
+        tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.cycleTabs(with: event) == true ? nil : event
+        }
+    }
+    /// ⌃⇥ and ⌃⇧⇥ switch tabs, but only in the browser window itself and
+    /// never while a sheet or popover has the keyboard.
+    @MainActor private func cycleTabs(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        guard event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift],
+              let browser, let window = NSApp.keyWindow, window === NSApp.mainWindow,
+              window.attachedSheet == nil, window.sheetParent == nil else { return false }
+        browser.selectAdjacentTab(modifiers.contains(.shift) ? -1 : 1)
+        return true
     }
     func applicationWillTerminate(_ notification: Notification) {
+        if let tabKeyMonitor { NSEvent.removeMonitor(tabKeyMonitor); self.tabKeyMonitor = nil }
         // Session and history writes are debounced, so quitting inside that
         // window would otherwise discard the most recent change.
         browser?.persistSession()
@@ -118,8 +172,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag, let window = sender.windows.first(where: { $0.canBecomeMain }) {
             window.makeKeyAndOrderFront(nil)
-            // We handled the reopen. Returning true also asks SwiftUI to open
-            // an untitled WindowGroup, potentially recreating the view graph.
+            // We handled the reopen. Returning true also asks SwiftUI to show
+            // the Window scene again, potentially recreating the view graph.
             return false
         }
         return true

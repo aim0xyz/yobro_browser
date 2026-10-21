@@ -37,6 +37,41 @@ extension BrowserModel {
         if space == original { space = value }
         persistSession()
     }
+    /// Deletes a Space with its tabs and folders. The tabs close as one undoable
+    /// step and reopen in the neighbouring Space, which also takes over if the
+    /// deleted one was shown. The last Space cannot be deleted.
+    func removeSpace(_ name: String) {
+        guard spaces.count > 1, let position = spaces.firstIndex(of: name) else { return }
+        let fallback = spaces[position + 1 < spaces.count ? position + 1 : position - 1]
+        freezeAutomaticAppearance()
+        if space == name { switchSpace(fallback) }
+        // Agent tabs are included; they are never stored for reopening.
+        closeTabs(tabs.filter { $0.space == name }.map(\.id), revealStartPage: true)
+        for index in closedTabs.indices where closedTabs[index].space == name {
+            closedTabs[index].space = fallback
+            closedTabs[index].folderID = nil
+        }
+        folders.removeAll { $0.space == name }
+        spaceIcons[name] = nil
+        spaceTones[name] = nil
+        chat.newChat(space: name)
+        spaces.removeAll { $0 == name }
+        persistSession()
+    }
+    func moveSpace(_ name: String, by offset: Int) {
+        guard offset != 0, let index = spaces.firstIndex(of: name), spaces.indices.contains(index + offset) else { return }
+        freezeAutomaticAppearance()
+        spaces.insert(spaces.remove(at: index), at: index + offset)
+        persistSession()
+    }
+    /// Unchosen icons and tones follow the position, so they are written down
+    /// before positions change; otherwise every later Space would repaint.
+    private func freezeAutomaticAppearance() {
+        for name in spaces {
+            spaceIcons[name] = spaceIcon(for: name).rawValue
+            spaceTones[name] = spaceTone(for: name).rawValue
+        }
+    }
     func setSpaceIcon(_ icon: SpaceIcon, for targetSpace: String) {
         guard spaces.contains(targetSpace) else { return }
         spaceIcons[targetSpace] = icon.rawValue
@@ -80,9 +115,15 @@ extension BrowserModel {
     }
     func moveToFolder(_ tabID: UUID, folder: UUID?) {
         guard let tab = tabs.first(where: { $0.id == tabID }) else { return }
+        // Folders are saved with the session; a private tab never is.
+        guard folder == nil || !tab.isPrivate else { return }
         if let folder, !folders.contains(where: { $0.id == folder && $0.space == tab.space }) { return }
-        tab.folderID = folder
-        if let partner = splitPairs.first(where: { $0.contains(tabID) })?.other(tabID) { tabs.first(where: { $0.id == partner })?.folderID = folder }
+        let partner = splitPairs.first(where: { $0.contains(tabID) })?.other(tabID).flatMap { id in tabs.first { $0.id == id } }
+        for member in [tab, partner].compactMap({ $0 }) {
+            member.folderID = folder
+            // A tab lives either in the pins or in a folder, never both.
+            if folder != nil { member.pinned = false }
+        }
         persistSession()
     }
     func moveFolder(_ id: UUID, relativeTo target: UUID, after: Bool) -> Bool {
@@ -121,10 +162,10 @@ extension BrowserModel {
     }
 
     /// Closes every tab below the sidebar divider: not pinned and in no
-    /// folder. Each one stays reopenable from the closed-tab list.
+    /// folder. They close as one step that a single undo restores; private
+    /// tabs are discarded and cannot be reopened.
     func clearTodayTabs() {
-        let ids = visibleTabs.filter { !$0.pinned && $0.folderID == nil }.map(\.id)
-        for id in ids { closeTab(id, revealStartPage: true) }
+        closeTabs(visibleTabs.filter { !$0.pinned && $0.folderID == nil }.map(\.id), revealStartPage: true)
     }
 
     func separateSplit(_ id: UUID? = nil) {
@@ -158,6 +199,9 @@ struct SpaceFolderRow: View {
     var body: some View {
         VStack(spacing: 3) {
             Button {
+                // A preview still waiting to open would appear over the
+                // folder the click just expanded.
+                revealTask?.cancel(); dismissTask?.cancel()
                 model.hoveredFolderID = nil
                 setCollapsed(!folder.collapsed)
             } label: {
@@ -187,6 +231,7 @@ struct SpaceFolderRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+                .accessibilityValue(folder.collapsed ? L("Eingeklappt", "Collapsed") : L("Ausgeklappt", "Expanded"))
                 .contentShape(Rectangle())
                 .onDrag {
                     model.beginSidebarFolderDrag(folder.id)
@@ -196,7 +241,9 @@ struct SpaceFolderRow: View {
                     sourceHovered = $0
                     if model.draggingTabID != nil || model.draggingFolderID != nil {
                         model.hoveredFolderID = nil
-                    } else if folder.collapsed {
+                    } else if folder.collapsed || (!$0 && model.hoveredFolderID == folder.id) {
+                        // Leaving must still close a preview the folder
+                        // showed before it was expanded.
                         hoverFolder($0)
                     }
                 }
@@ -232,7 +279,7 @@ struct SpaceFolderRow: View {
                                     .padding(.horizontal, 8).frame(height: 42).contentShape(Rectangle())
                                     .background(tab.id == model.activeID ? moss.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 9))
                                 }
-                                .buttonStyle(OrganizationPopoverButtonStyle(hoverChanged: hoverFolder))
+                                .buttonStyle(OrganizationPopoverButtonStyle())
                                 .contentShape(Rectangle())
                                 .tabDropIndicator(model.tabDropFeedback?.targetID == tab.id ? model.tabDropFeedback?.intent : nil, gap: 5)
                                 .onDrag {
@@ -246,6 +293,8 @@ struct SpaceFolderRow: View {
                         }
                     }
                     .padding(10).frame(width: 260).background(paper)
+                    // Only the whole popover decides: rows reporting their own
+                    // exit closed it while the pointer crossed the title line.
                     .onHover(perform: hoverFolder)
                 }
                 .onChange(of: model.hoveredFolderID) { _, hoveredID in
@@ -285,6 +334,7 @@ struct SpaceFolderRow: View {
         .onDisappear {
             revealTask?.cancel()
             dismissTask?.cancel()
+            if model.hoveredFolderID == folder.id { model.hoveredFolderID = nil }
         }
     }
 
@@ -303,7 +353,8 @@ struct SpaceFolderRow: View {
                 guard !Task.isCancelled,
                       model.draggingTabID == nil,
                       model.draggingFolderID == nil,
-                      !model.extensionActionPopupPresented else { return }
+                      !model.extensionActionPopupPresented,
+                      model.folders.first(where: { $0.id == folder.id })?.collapsed == true else { return }
                 model.hoveredFolderID = folder.id
             }
             return
@@ -355,7 +406,7 @@ struct FolderHeaderDropDelegate: DropDelegate {
         guard let tabID = model.draggingTabID,
               let tab = model.visibleTabs.first(where: { $0.id == tabID }),
               let folder = model.folders.first(where: { $0.id == folderID }) else { return false }
-        return tab.space == folder.space
+        return tab.space == folder.space && !tab.isPrivate
     }
 
     func dropEntered(info: DropInfo) { updateFeedback(info) }
@@ -434,19 +485,17 @@ struct FolderColorMenu: View {
 }
 
 private struct OrganizationPopoverButtonStyle: ButtonStyle {
-    let hoverChanged: (Bool) -> Void
-    func makeBody(configuration: Configuration) -> some View { Surface(configuration: configuration, hoverChanged: hoverChanged) }
+    func makeBody(configuration: Configuration) -> some View { Surface(configuration: configuration) }
 
     private struct Surface: View {
         let configuration: ButtonStyle.Configuration
-        let hoverChanged: (Bool) -> Void
         @State private var hovering = false
         var body: some View {
             configuration.label
                 .contentShape(Rectangle())
                 .background(moss.opacity(configuration.isPressed ? 0.16 : hovering ? 0.10 : 0), in: RoundedRectangle(cornerRadius: 9))
                 .animation(.easeOut(duration: 0.12), value: hovering)
-                .onHover { hovering = $0; hoverChanged($0) }
+                .onHover { hovering = $0 }
         }
     }
 }

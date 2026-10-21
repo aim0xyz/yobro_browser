@@ -43,11 +43,11 @@ Passkey signing preparation and remaining NordVPN limitations: [implementation s
 
 **Erweiterungen & Import:** Install compatible Chrome Web Store packages or local WebExtensions (macOS 15.4+), import selected bookmarks, history, tabs, password CSVs and cookies from supported browser profiles or exports, and manage imported bookmarks and Keychain passwords via **⌘,**. See [formats and limitations](docs/EXTENSIONS-IMPORT.md).
 
-**Look:** each Space has its own colour (pick it from the Space menu); the window and sidebar take that tone, text and icons use a dark shade of the same hue, and pages float as white cards with an 8 pt gap. The sidebar holds back/forward/reload, the current address, pinned tabs as a favicon grid, the Space's folders, a divider whose **Clear** closes today's tabs, and the Space switcher at the bottom. ⌘S hides the sidebar for a full-page view; it slides back in at the left edge. ⌥⌘S switches to YAB's tabs-on-top layout: the Space, pinned tabs and tabs in a strip above the page, with back/forward/reload and the site in a slim bar on each page. A faint grain textures the tinted window.
+**Look:** each Space has its own colour (pick it from the Space menu); the window and sidebar take that tone, text and icons use a dark shade of the same hue, and pages float as white cards with an 8 pt gap. The sidebar holds back/forward/reload, the current address, pinned tabs as a favicon grid, the Space's folders, a divider whose **Clear** closes today's tabs (one undo brings them back), and the Space switcher at the bottom. ⌘S hides the sidebar for a full-page view; it slides back in at the left edge. ⌥⌘S switches to YAB's tabs-on-top layout: the Space, pinned tabs and tabs in a strip above the page, with back/forward/reload and the site in a slim bar on each page. A faint grain textures the tinted window.
 
 **Peek:** Shift-click a link to preview it over the current page. Keep it as a tab, open it side by side in split view, or close it with Esc; until then it never appears in the sidebar.
 
-**Address field:** ⌘T, ⌘L and ⌘K open one centred field. Typing searches DuckDuckGo or opens an address; suggestions include open tabs, history and bookmarks, and an empty field lists recent tabs plus the last closed one. ⌘T opens the destination in a new tab without creating an empty tab first.
+**Address field:** ⌘T, ⌘L and ⌘K open one centred field; on a blank tab they focus the field already on the page. Typing searches with the chosen search engine (DuckDuckGo by default) or opens an address. A visited site whose address completes what you typed is offered first, followed by open tabs, history and bookmarks, and an empty field lists recent tabs plus the last closed one. ⌘T opens the destination in a new tab without creating an empty tab first.
 
 **Assistant:** ⇧⌘A opens the assistant beside the page. It uses your own OpenRouter account (sign in with one click) or any OpenAI-compatible endpoint, including a local server. It reads the tabs of the current Space and works in its own agent tabs beside yours; it cannot click, type or scroll in your tabs and never sees private tabs. Before anything that sends, publishes, books or pays it is told to ask you in the chat. Conversation history is stored per profile in `space-chat.json`; each request sends up to 30 recent messages of the current Space.
 
@@ -58,12 +58,13 @@ There is no cross-device sync: tabs, history and bookmarks stay on the Mac.
 - Native WebKit tabs with persistent cookies and login sessions.
 - Sidebar, pinned tabs (right-click a tab), custom spaces with icons and colours, coloured tab folders and resizable split view.
 - Searchable local history and bookmarks.
-- WebKit download manager with progress, cancellation, Finder reveal and collision-safe filenames.
+- WebKit download manager with progress, cancellation, Finder reveal and collision-safe filenames. Downloads from private tabs are listed until YoBro quits but never saved to the download history.
 - Drag a tab onto another tab to pair them in split view; separate them without closing either page. Drop near a row edge to reorder. Website favicons appear beside tab titles.
 - Duplicate tabs and reopen the last 20 closed tabs, including after a restart.
 - Native in-page search with next/previous match and wraparound.
-- ⌘S toggle sidebar, ⌥⌘S tabs on top, ⌘T new tab, ⌘L address, ⌘W close tab, ⌘R reload, ⇧⌘S split, ⇧⌘A assistant, Shift-click Peek.
-- ⌘K address field, ⌘F page search, ⌘G / ⇧⌘G next/previous match, ⌘Y history, ⇧⌘J downloads, ⇧⌘T reopen closed tab.
+- ⌘S toggle sidebar (the tab bar when tabs are on top), ⌥⌘S tabs on top, ⌘T new tab, ⇧⌘N private tab, ⌘L address, ⌘W close tab (or the Peek), ⇧⌘T reopen closed tab, ⇧⌘W close window, ⌘R reload, ⇧⌘S split view, ⇧⌘A assistant, ⌥⌘P Control Center, Shift-click Peek.
+- ⌘K address field, ⌘F page search, ⌘G / ⇧⌘G next/previous match, ⇧⌘C copy link, ⌘D bookmark, ⌥⌘B bookmarks, ⌘P print, ⌘Y history, ⇧⌘J downloads.
+- ⇧⌘[ / ⇧⌘] or ⌃⇧⇥ / ⌃⇥ previous/next tab, ⌘1–⌘8 tab by position, ⌘9 last tab, ⌥⌘← / ⌥⌘→ previous/next Space, ⌘[ / ⌘] back and forward, ⌘+ / ⌘- / ⌘0 zoom.
 
 Spaces organize tabs within a profile and share that profile’s cookie store. Local browser profiles have separate cookies and website data. Sessions restore URLs, not back/forward history or in-page form state.
 

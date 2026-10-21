@@ -399,12 +399,129 @@ final class CompactSidebarTests: XCTestCase {
         let folder = try XCTUnwrap(model.folders.first)
         let pinned = model.newTab(url: "https://pinned.example"); pinned.pinned = true
         let filed = model.newTab(url: "https://filed.example"); model.moveToFolder(filed.id, folder: folder.id)
-        let loose = model.newTab(url: "https://loose.example")
+        // Blank pages: undo selects every restored tab, and 25 page loads
+        // would slow the window tests that follow.
+        let blank = (1...24).map { index in
+            BrowserTab(saved: StoredTab(id: UUID(), title: "Loose \(index)", url: "", space: model.space, pinned: false), owner: model, deferLoading: true)
+        }
+        model.tabs += blank
+        let loose = blank + [model.newTab(url: "https://loose.example")]
         model.clearTodayTabs()
         XCTAssertTrue(model.tabs.contains { $0.id == pinned.id })
         XCTAssertTrue(model.tabs.contains { $0.id == filed.id })
-        XCTAssertFalse(model.tabs.contains { $0.id == loose.id })
+        XCTAssertFalse(model.tabs.contains { tab in loose.contains { $0.id == tab.id } })
         XCTAssertEqual(model.closedTabs.last?.url, "https://loose.example")
+        XCTAssertEqual(model.closedTabUndoCount, 25, "Clear is one step for undo")
+
+        model.undoClosedTabs()
+        XCTAssertEqual(model.tabs.map(\.id), [pinned.id, filed.id] + loose.map(\.id))
+    }
+
+    @MainActor
+    func testFilingAPinnedTabUnpinsItAndPrivateTabsStayOutOfPinsAndFolders() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Work")
+        let folder = try XCTUnwrap(model.folders.first)
+        let pinned = model.newTab(); pinned.pinned = true
+
+        model.moveToFolder(pinned.id, folder: folder.id)
+        XCTAssertFalse(pinned.pinned)
+        XCTAssertEqual(pinned.folderID, folder.id)
+
+        let privateTab = model.newTab(isPrivate: true)
+        model.moveToFolder(privateTab.id, folder: folder.id)
+        XCTAssertNil(privateTab.folderID, "A private tab is never saved, so it cannot join a folder")
+
+        let pin = model.newTab(); pin.pinned = true
+        let order = model.tabs.map(\.id)
+        XCTAssertFalse(model.moveTab(privateTab.id, relativeTo: pin.id, after: true))
+        XCTAssertEqual(model.tabs.map(\.id), order)
+        XCTAssertFalse(privateTab.pinned)
+    }
+
+    @MainActor
+    func testRemovingTheActiveSpaceMovesItsTabsToTheNeighbour() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addSpace("Third")
+        let (first, removed, third) = (model.spaces[0], model.spaces[1], model.spaces[2])
+        let icons = (model.spaceIcon(for: first), model.spaceIcon(for: third))
+        let tones = (model.spaceTone(for: first), model.spaceTone(for: third))
+        try model.addFolder("Work", in: removed)
+        let folder = try XCTUnwrap(model.folders.first)
+        let pages = ["https://a.example", "https://b.example"].map { url in
+            BrowserTab(saved: StoredTab(id: UUID(), title: url, url: url, space: removed, pinned: false), owner: model, deferLoading: true)
+        }
+        model.tabs += pages
+        pages[1].folderID = folder.id
+        model.select(pages[0].id)
+        XCTAssertEqual(model.space, removed)
+
+        model.removeSpace(removed)
+
+        XCTAssertEqual(model.spaces, [first, third])
+        XCTAssertEqual(model.space, third, "The next Space takes over")
+        XCTAssertFalse(model.tabs.contains { $0.space == removed })
+        XCTAssertFalse(model.folders.contains { $0.space == removed })
+        XCTAssertFalse(model.closedTabs.contains { $0.space == removed })
+        XCTAssertNil(model.spaceTones[removed])
+        XCTAssertNil(model.spaceIcons[removed])
+        XCTAssertEqual(model.spaceIcon(for: first), icons.0)
+        XCTAssertEqual(model.spaceIcon(for: third), icons.1, "Moving up a position must not change the icon")
+        XCTAssertEqual(model.spaceTone(for: first), tones.0)
+        XCTAssertEqual(model.spaceTone(for: third), tones.1, "Moving up a position must not change the colour")
+
+        model.undoClosedTabs()
+        let restored = model.tabs.filter { tab in pages.contains { $0.id == tab.id } }
+        XCTAssertEqual(restored.map(\.id), pages.map(\.id))
+        XCTAssertTrue(restored.allSatisfy { $0.space == third && $0.folderID == nil })
+
+        model.removeSpace(first)
+        XCTAssertEqual(model.spaces, [third])
+        model.removeSpace(third)
+        XCTAssertEqual(model.spaces, [third], "The last Space stays")
+    }
+
+    @MainActor
+    func testMovingASpaceKeepsItsColour() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        let (first, second) = (model.spaces[0], model.spaces[1])
+        let tones = (model.spaceTone(for: first), model.spaceTone(for: second))
+
+        model.moveSpace(second, by: -1)
+        XCTAssertEqual(model.spaces, [second, first])
+        model.moveSpace(second, by: -1)
+        XCTAssertEqual(model.spaces, [second, first], "Moving past the start does nothing")
+        XCTAssertEqual(model.spaceTone(for: first), tones.0)
+        XCTAssertEqual(model.spaceTone(for: second), tones.1)
+
+        let restored = BrowserModel(root: home)
+        XCTAssertEqual(restored.spaces, [second, first])
+        XCTAssertEqual(restored.spaceTone(for: second), tones.1)
+    }
+
+    @MainActor
+    func testClearingHistoryAlsoForgetsClosedTabs() {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        let tab = model.newTab(url: "https://example.com")
+        model.history = [HistoryEntry(title: "Example", url: "https://example.com/")]
+        model.closeTab(tab.id)
+        XCTAssertFalse(model.closedTabs.isEmpty)
+        XCTAssertNotNil(model.closedTabUndoID)
+
+        model.clearHistory()
+
+        XCTAssertTrue(model.history.isEmpty)
+        XCTAssertTrue(model.closedTabs.isEmpty, "Closed tabs keep URLs of their own")
+        XCTAssertNil(model.closedTabUndoID)
+        XCTAssertNil(model.reopenTab())
     }
 
     @MainActor
