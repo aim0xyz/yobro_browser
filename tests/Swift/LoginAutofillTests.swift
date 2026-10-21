@@ -68,6 +68,56 @@ final class LoginAutofillTests: XCTestCase {
     }
 
     @MainActor
+    func testNeverListSuppressesSavePromptUntilRemoved() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: PasswordVault.service(home: home)] as CFDictionary)
+            try? FileManager.default.removeItem(at: home)
+        }
+        let login = LoginAutofill()
+        let entry = ImportPassword(url: "https://login.example.test", username: "person@example.test", password: "fixture-only")
+        try LoginNeverList.add(entry.url, home: home)
+        try LoginNeverList.add("https://another.example.test", home: home)
+        XCTAssertEqual(LoginNeverList.all(home: home), ["https://another.example.test", "https://login.example.test"])
+        login.considerForSaving(entry, home: home)
+        XCTAssertNil(login.pending, "A website on the never list must not prompt")
+        try LoginNeverList.remove(entry.url, home: home)
+        XCTAssertFalse(LoginNeverList.contains(entry.url, home: home))
+        login.considerForSaving(entry, home: home)
+        XCTAssertEqual(login.pending?.entry.username, entry.username)
+    }
+
+    @MainActor
+    func testPopupMessagesRouteToThePopupsOwnAutofill() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let previous = getenv("YOBRO_HOME").map { String(cString: $0) }
+        setenv("YOBRO_HOME", home.path, 1)
+        defer {
+            if let previous { setenv("YOBRO_HOME", previous, 1) } else { unsetenv("YOBRO_HOME") }
+            try? FileManager.default.removeItem(at: home)
+        }
+        let model = BrowserModel(root: home)
+        let opener = model.newTab()
+        // A popup reuses the opener's configuration, and so its message handler.
+        let popup = model.newTab(webViewConfiguration: opener.webView.configuration, useConfigurationDirectly: true)
+        XCTAssertTrue(popup.webView.configuration.userContentController === opener.webView.configuration.userContentController)
+        XCTAssertTrue(LoginAutofill.target(for: popup.webView, owner: opener.logins) === popup.logins)
+        XCTAssertTrue(LoginAutofill.target(for: opener.webView, owner: opener.logins) === opener.logins)
+        let privateTab = model.newTab(isPrivate: true)
+        XCTAssertNil(LoginAutofill.target(for: privateTab.webView, owner: opener.logins))
+    }
+
+    func testAutomaticSuggestionsStayQuietWithoutSavedLogins() {
+        let entry = ImportPassword(url: "https://login.example.test", username: "person@example.test", password: "fixture-only")
+        XCTAssertFalse(LoginAutofill.shouldPresent(automatic: true, entries: [], error: nil))
+        XCTAssertFalse(LoginAutofill.shouldPresent(automatic: true, entries: [], error: "Keychain locked"))
+        XCTAssertTrue(LoginAutofill.shouldPresent(automatic: true, entries: [entry], error: nil))
+        // A click on the key always answers, also to explain that nothing is saved.
+        XCTAssertTrue(LoginAutofill.shouldPresent(automatic: false, entries: [], error: nil))
+        XCTAssertTrue(LoginAutofill.shouldPresent(automatic: false, entries: [], error: "Keychain locked"))
+    }
+
+    @MainActor
     func testTrustedSubmitOffersSavingWithoutStoringAutomatically() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let previous = getenv("YOBRO_HOME").map { String(cString: $0) }

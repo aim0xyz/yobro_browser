@@ -80,6 +80,71 @@ final class BrowserProfileTests: XCTestCase {
         }
     }
 
+    func testDeleteRemovesProfileDataAndReturnsToOriginal() async throws {
+        try await isolated { root in
+            let profiles = BrowserProfiles(root: root)
+            try profiles.create(name: "Temporary", symbol: "leaf.fill")
+            let id = profiles.active.id
+            let model = profiles.browser
+            let home = model.home
+            let services = [PasswordVault.service(home: home), AgentAPIKeySecrets.service(home: home)]
+            defer { for service in services { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary) } }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: home.path))
+            XCTAssertTrue(try PasswordVault.store(ImportPassword(url: "https://profile-delete.invalid", username: "synthetic", password: "synthetic-only"), home: home, replace: false))
+            try AgentAPIKeySecrets.store("synthetic-key", endpoint: "https://agent.invalid", home: home)
+            try AgentConnectionBinding.save(client: .codex, socket: model.controlSocketURL)
+            try AgentConnectionBinding.save(client: .claude, socket: root.appendingPathComponent("control.sock"))
+
+            try profiles.delete(id)
+            XCTAssertEqual(profiles.active.id, LocalBrowserProfile.originalID)
+            XCTAssertTrue(profiles.browser.isProfileActive)
+            XCTAssertFalse(model.isProfileActive)
+            XCTAssertFalse(profiles.registry.profiles.contains { $0.id == id })
+            let saved = try JSONDecoder().decode(BrowserProfiles.Registry.self, from: Data(contentsOf: root.appendingPathComponent("profiles.json")))
+            XCTAssertFalse(saved.profiles.contains { $0.id == id })
+            XCTAssertFalse(FileManager.default.fileExists(atPath: home.path))
+            for service in services {
+                let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                            kSecReturnAttributes as String: true, kSecMatchLimit as String: kSecMatchLimitAll]
+                XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecItemNotFound)
+            }
+            XCTAssertNil(AgentConnectionBinding.read(client: .codex, root: root), "The deleted profile's agent link must go")
+            XCTAssertNotNil(AgentConnectionBinding.read(client: .claude, root: root), "Other profiles keep their links")
+            XCTAssertThrowsError(try profiles.delete(LocalBrowserProfile.originalID))
+            try await Task.sleep(nanoseconds: 150_000_000)
+        }
+    }
+
+    func testSwitchingProfilesCarriesAppWideLayoutPreferences() async throws {
+        try await isolated { root in
+            let defaults = UserDefaults.standard
+            let keys = ["YOBRO.tabsOnTop", "YOBRO.showSidebar", "YOBRO.autoSuspendInactiveTabs"]
+            let previous = keys.map { defaults.object(forKey: $0) }
+            defer {
+                for (key, value) in zip(keys, previous) {
+                    if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+                }
+            }
+            let profiles = BrowserProfiles(root: root)
+            let first = profiles.browser
+            let firstID = profiles.active.id
+            try profiles.create(name: "Second", symbol: "moon.fill")
+            let second = profiles.browser
+            let secondID = profiles.active.id
+            try profiles.switchTo(firstID)
+            first.tabsOnTop.toggle()
+            first.showSidebar.toggle()
+            first.autoSuspendInactiveTabs.toggle()
+            XCTAssertNotEqual(second.tabsOnTop, first.tabsOnTop)
+            try profiles.switchTo(secondID)
+            XCTAssertTrue(profiles.browser === second)
+            XCTAssertEqual(second.tabsOnTop, first.tabsOnTop)
+            XCTAssertEqual(second.showSidebar, first.showSidebar)
+            XCTAssertEqual(second.autoSuspendInactiveTabs, first.autoSuspendInactiveTabs)
+            try await Task.sleep(nanoseconds: 150_000_000)
+        }
+    }
+
     func testCorruptRegistryIsNotOverwritten() async throws {
         try await isolated { root in
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

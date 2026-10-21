@@ -18,17 +18,21 @@ struct EncryptedBrowserPassword: Decodable {
 /// authorization prompts; denial stops the operation. No ACLs are changed.
 enum NativePasswordImport {
     static func load(browser: String, profile: String, primaryPassword: String = "") async throws -> NativePasswordResult {
-        if browser == "Firefox" {
+        switch ImportBrowser.named(browser)?.family {
+        case .firefox:
             return try await ImportWorker.call(["action": "firefox_passwords", "path": profile, "primaryPassword": primaryPassword], as: NativePasswordResult.self)
-        }
-        if browser == "Safari" {
+        case .safari:
             return try await Task.detached(priority: .userInitiated) { try safariPasswords() }.value
+        case .chromium:
+            break
+        case nil:
+            throw YOBROError.message(L("Dieser Browser wird nicht unterstützt.", "This browser is not supported."))
         }
-        guard ["Chrome", "Brave", "Arc"].contains(browser) else { throw YOBROError.message(L("Dieser Browser wird nicht unterstützt.", "This browser is not supported.")) }
+        guard let service = safeStorageService(browser: browser) else { throw YOBROError.message(L("Dieser Browser wird nicht unterstützt.", "This browser is not supported.")) }
         let rows = try await ImportWorker.call(["action": "chromium_passwords", "path": profile], as: [EncryptedBrowserPassword].self)
         guard !rows.isEmpty else { return NativePasswordResult() }
         return try await Task.detached(priority: .userInitiated) {
-            let secret = try safeStorage(browser: browser)
+            let secret = try safeStorage(service: service, browser: browser)
             let key = try deriveKey(secret)
             var result = NativePasswordResult()
             var unsupported = 0
@@ -45,9 +49,13 @@ enum NativePasswordImport {
         }.value
     }
 
-    private static func safeStorage(browser: String) throws -> Data {
+    /// The Keychain item a Chromium browser encrypts its passwords with. Not
+    /// always "<name> Safe Storage": Edge uses "Microsoft Edge Safe Storage".
+    static func safeStorageService(browser: String) -> String? { ImportBrowser.named(browser)?.safeStorage }
+
+    private static func safeStorage(service: String, browser: String) throws -> Data {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "\(browser) Safe Storage", kSecReturnData as String: true,
+            kSecAttrService as String: service, kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)

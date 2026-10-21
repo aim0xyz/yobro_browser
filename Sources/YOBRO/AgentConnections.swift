@@ -93,7 +93,13 @@ struct AgentConnectionsView: View {
     @State private var busy = false
     @State private var revision = 0
     private var root: URL { model.controlSocketURL.deletingLastPathComponent() }
-    private var bound: Bool { AgentConnectionBinding.read(client: client, root: root)?.socketName == model.controlSocketURL.lastPathComponent }
+    private var bound: Bool { isBound(client) }
+    func isBound(_ client: AgentClient) -> Bool {
+        AgentConnectionBinding.read(client: client, root: root)?.socketName == model.controlSocketURL.lastPathComponent
+    }
+    /// Access stays switchable whichever agent is picked, so it can always be
+    /// turned off again once granted.
+    var showsAccessToggle: Bool { model.agentEnabled || AgentClient.allCases.contains(where: isBound) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -121,9 +127,6 @@ struct AgentConnectionsView: View {
                             Button(client == .claude ? L("Claude-Erweiterung speichern …", "Save Claude extension …") : L("Codex-Plugin installieren", "Install Codex plugin")) { install() }.disabled(busy)
                             if busy { ProgressView().controlSize(.small) }
                         }
-                        Toggle(L("Agent-Zugriff für dieses Profil erlauben", "Allow agent access to this profile"), isOn: $model.agentEnabled)
-                        Text(L("Gelesene Seiteninhalte gehen an deinen Agent-Anbieter. Website-Logins werden innerhalb dieses Profils verwendet. Die Installation kopiert keine Passwörter, Cookies oder VPN-Schlüssel in die Erweiterung.", "Read page content is sent to your agent provider. Website logins are used within this profile. Installation does not copy passwords, cookies, or VPN keys into the extension."))
-                            .font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Button(L("Lokale Verbindung prüfen", "Check local connection")) { check() }.disabled(busy)
                             Button(L("Verknüpfung entfernen", "Remove connection")) {
@@ -136,9 +139,18 @@ struct AgentConnectionsView: View {
                         }
                     }
                 }
+                if showsAccessToggle {
+                    Toggle(L("Agent-Zugriff für dieses Profil erlauben", "Allow agent access to this profile"), isOn: $model.agentEnabled)
+                    Text(L("Gelesene Seiteninhalte gehen an deinen Agent-Anbieter. Website-Logins werden innerhalb dieses Profils verwendet. Die Installation kopiert keine Passwörter oder Cookies in die Erweiterung.", "Read page content is sent to your agent provider. Website logins are used within this profile. Installation does not copy passwords or cookies into the extension."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if !message.isEmpty { Text(message).font(.callout).fixedSize(horizontal: false, vertical: true) }
             }.padding(2)
-        }.onChange(of: client) { _, _ in message = "" }
+        }
+        .onChange(of: client) { _, _ in message = "" }
+        .onAppear {
+            if !isBound(client), let linked = AgentClient.allCases.first(where: isBound) { client = linked }
+        }
     }
     private func install() {
         busy = true

@@ -175,6 +175,28 @@ class BrowserImportTests(unittest.TestCase):
         self.assertEqual(preview['passwords'], [])
         self.assertEqual(len(m.chromium_passwords(self.root)), 2)
 
+    def test_profiles_find_edge_and_zen_with_their_family(self):
+        support = self.root/'Library/Application Support'
+        edge = support/'Microsoft Edge/Default'; edge.mkdir(parents=True)
+        (edge/'Preferences').write_text(json.dumps({'profile': {'name': 'Work'}}))
+        (support/'Microsoft Edge/Crashpad').mkdir()
+        zen = support/'zen/Profiles/abcd1234.Default (release)'; zen.mkdir(parents=True)
+        found = {(p['browser'], p['name']): p for p in m.profiles(self.root)}
+        self.assertIn(('Edge', 'Work'), found)
+        self.assertIn(('Zen', 'abcd1234.Default (release)'), found)
+        self.assertNotIn('Crashpad', [name for _, name in found])
+        self.assertTrue(m.is_chromium('Edge')); self.assertFalse(m.is_firefox('Edge'))
+        self.assertTrue(m.is_firefox('Zen')); self.assertFalse(m.is_chromium('Zen'))
+        self.assertTrue(m.is_chromium('Vivaldi'))
+        self.assertFalse(m.is_chromium('Safari') or m.is_firefox('Safari'))
+        # Zen profiles are read like Firefox ones.
+        with sqlite3.connect(zen/'places.sqlite') as db:
+            db.executescript('CREATE TABLE moz_places(id,url,title,last_visit_date,visit_count); CREATE TABLE moz_bookmarks(id,parent,title,fk);')
+            db.execute('INSERT INTO moz_places VALUES(1,"https://example.org","Page",1700000000000000,3)')
+            db.execute('INSERT INTO moz_bookmarks VALUES(1,0,"Zen folder",NULL)'); db.execute('INSERT INTO moz_bookmarks VALUES(2,1,"Bookmark",1)')
+        result = m.profile_data('Zen', zen, {'bookmarks'})
+        self.assertEqual(result['bookmarks'][0]['folder'], 'Zen folder')
+
     def test_tabs_reject_local_and_script_urls(self):
         p=self.file('tabs.txt','file:///etc/passwd\njavascript:alert(1)\nhttps://example.org\n')
         self.assertEqual(len(m.file_data('tabs',p)['tabs']),1)

@@ -112,7 +112,6 @@
   "Erweiterungen benötigen macOS 15.4 oder neuer.": "Extensions require macOS 15.4 or later.",
   "Erweiterungen für deinen Browser": "Extensions for your browser",
   "Erweiterungen und Datenimport …": "Extensions and data import …",
-  "Erweiterungen und Import …": "Extensions and import …",
   "Externe Bilder laden": "Load external images",
   "Fehlgeschlagen": "Failed",
   "Für große Ideen und die kleinen Umwege dazwischen.": "For big ideas and the little detours along the way.",
@@ -165,7 +164,6 @@
   "Marktplatz öffnen": "Open marketplace",
   "Mein Postfach": "My inbox",
   "Meine Lesezeichen": "My bookmarks",
-  "Mit ⌘T öffnest du einen Tab. Spaces und Ordner helfen dir beim Sortieren.": "Open a tab with ⌘T. Spaces and folders keep things organized.",
   "Nachricht laden …": "Load message …",
   "Nachrichten suchen": "Search messages",
   "Nachrichten werden geladen …": "Loading messages …",
@@ -203,7 +201,7 @@
   "Paket wird vom Chrome Web Store geladen …": "Downloading package from the Chrome Web Store …",
   "Passwort": "Password",
   "Passwort kopieren": "Copy password",
-  "Passwort-CSV aus Safari, Arc, Brave, Chrome oder Firefox": "Password CSV from Safari, Arc, Brave, Chrome or Firefox",
+  "Passwort-CSV aus Safari, Arc, Brave, Chrome, Edge, Vivaldi, Firefox oder Zen": "Password CSV from Safari, Arc, Brave, Chrome, Edge, Vivaldi, Firefox or Zen",
   "Passwörter": "Passwords",
   "Passwörter im macOS-Schlüsselbund": "Passwords in macOS Keychain",
   "Passwörter und Cookie-Werte werden hier nicht angezeigt.": "Passwords and cookie values are not displayed here.",
@@ -332,7 +330,6 @@
   "Bitte einen Erweiterungsordner, ZIP oder CRX auswählen.": "Select an extension folder, ZIP or CRX.",
   "Der Erweiterungsordner enthält symbolische Links. Bitte eine eigenständige Kopie verwenden.": "The extension folder contains symbolic links. Use a standalone copy.",
   "Diese Manifest-Version wird von WebKit nicht unterstützt.": "This manifest version is not supported by WebKit.",
-  "Diese Erweiterung benötigt die Chrome-Proxy-API (proxy). YoBro unterstützt diese API noch nicht; VPN-Verbindungen dieser Erweiterung funktionieren deshalb nicht. Das betrifft auch NordVPN. Für den VPN-Schutz kann die separate macOS-App des Anbieters verwendet werden.": "This extension requires the Chrome proxy API, which YoBro does not support yet. Its VPN connections will not work, including NordVPN. Use your provider's separate macOS app for VPN protection.",
   "Von WebKit nicht unterstützte Berechtigungen: ": "Permissions not supported by WebKit: ",
   ". Zugehörige Funktionen können ausfallen.": ". Related features may not work.",
   "Unvollständige CRX-Datei.": "Incomplete CRX file.",
@@ -342,9 +339,5 @@
   "Nicht unterstützte Adresse": "Unsupported address",
   "Bitte zuerst einen Browser-Tab öffnen.": "Open a browser tab first.",
   "Keine Einstellungsseite verfügbar.": "No settings page available.",
-  "YoBro Mail · Alle Postfächer": "YoBro Mail · All inboxes",
-  "Proxy / VPN": "Proxy / VPN",
-  "Proxy / VPN konfigurieren …": "Configure Proxy / VPN …",
-  "Proxy / VPN einrichten …": "Configure Proxy / VPN …",
-  "Spaces & Proxy": "Spaces & Proxy"
+  "YoBro Mail · Alle Postfächer": "YoBro Mail · All inboxes"
 }

@@ -18,6 +18,24 @@ from urllib.parse import urlparse
 
 MAX_FILE = 100 * 1024 * 1024
 KINDS = {'bookmarks', 'history', 'tabs', 'passwords', 'cookies'}
+# Browser name -> (profile format family, profile root below Application Support).
+BROWSERS = {
+    'Chrome': ('chromium', 'Google/Chrome'),
+    'Brave': ('chromium', 'BraveSoftware/Brave-Browser'),
+    'Arc': ('chromium', 'Arc/User Data'),
+    'Edge': ('chromium', 'Microsoft Edge'),
+    'Vivaldi': ('chromium', 'Vivaldi'),
+    'Firefox': ('firefox', 'Firefox/Profiles'),
+    'Zen': ('firefox', 'zen/Profiles'),
+}
+
+
+def is_firefox(browser):
+    return BROWSERS.get(browser, (None,))[0] == 'firefox'
+
+
+def is_chromium(browser):
+    return BROWSERS.get(browser, (None,))[0] == 'chromium'
 
 
 def localized(german, english):
@@ -111,14 +129,14 @@ def profiles(home=None):
     home = Path(home or Path.home())
     support = home / 'Library/Application Support'
     result = []
-    roots = [('Chrome', support / 'Google/Chrome'), ('Brave', support / 'BraveSoftware/Brave-Browser'), ('Arc', support / 'Arc/User Data'), ('Firefox', support / 'Firefox/Profiles')]
     safari = home / 'Library/Safari'
     result.append({'id': str(safari), 'browser': 'Safari', 'name': 'Safari', 'path': str(safari)})
-    for browser, root in roots:
+    for browser, (_, folder) in BROWSERS.items():
+        root = support / folder
         if not root.exists():
             continue
         try:
-            dirs = sorted(p for p in root.iterdir() if p.is_dir() and (browser == 'Firefox' or p.name == 'Default' or p.name.startswith('Profile ')))
+            dirs = sorted(p for p in root.iterdir() if p.is_dir() and (is_firefox(browser) or p.name == 'Default' or p.name.startswith('Profile ')))
             for path in dirs:
                 name = path.name
                 preferences = path/'Preferences'
@@ -400,18 +418,18 @@ def profile_data(browser, path, kinds):
         try:
             if kind == 'passwords':
                 count = None
-                if browser in ('Chrome', 'Brave', 'Arc'):
+                if is_chromium(browser):
                     databases = [path/name for name in ('Login Data', 'Login Data For Account') if (path/name).exists()]
                     if databases:
                         count = sum(query(db, 'SELECT COUNT(*) FROM logins WHERE blacklisted_by_user = 0 AND length(password_value) > 0')[0][0] for db in databases)
-                elif browser == 'Firefox' and (path/'logins.json').exists():
+                elif is_firefox(browser) and (path/'logins.json').exists():
                     count = len(json.loads(read_bytes(path/'logins.json')).get('logins', []))
                 result['detectedPasswords'] = count
                 result['availability'][kind] = localized(f'{count} gespeicherte Konten erkannt · Zum Übernehmen entsperren', f'{count} saved accounts detected · Unlock to transfer') if count is not None else localized('Zum Prüfen und Übernehmen entsperren', 'Unlock to check and transfer')
                 if browser == 'Safari':
                     result['availability'][kind] = localized('Lokaler macOS-Schlüsselbund; iCloud bei Bedarf per Export', 'Local macOS Keychain; use an export for iCloud if needed')
             elif kind == 'bookmarks':
-                if browser == 'Firefox':
+                if is_firefox(browser):
                     rows = query(path/'places.sqlite', 'SELECT b.id,b.parent,b.title,p.url FROM moz_bookmarks b LEFT JOIN moz_places p ON p.id=b.fk')
                     nodes = {r[0]: r for r in rows}
                     for key, parent, title, url in rows:
@@ -426,12 +444,12 @@ def profile_data(browser, path, kinds):
                 else:
                     result[kind] = chromium_bookmarks(path/'Bookmarks')
             elif kind == 'history':
-                if browser == 'Firefox': rows = query(path/'places.sqlite', 'SELECT url, title, last_visit_date/1000000.0, visit_count FROM moz_places WHERE last_visit_date IS NOT NULL ORDER BY last_visit_date DESC LIMIT 100000')
+                if is_firefox(browser): rows = query(path/'places.sqlite', 'SELECT url, title, last_visit_date/1000000.0, visit_count FROM moz_places WHERE last_visit_date IS NOT NULL ORDER BY last_visit_date DESC LIMIT 100000')
                 elif browser == 'Safari': rows = query(path/'History.db', 'SELECT i.url, v.title, MAX(v.visit_time)+978307200, i.visit_count FROM history_items i JOIN history_visits v ON v.history_item=i.id GROUP BY i.id ORDER BY MAX(v.visit_time) DESC LIMIT 100000')
                 else: rows = query(path/'History', 'SELECT url,title,last_visit_time/1000000.0-11644473600,visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100000')
                 result[kind] = [{'url': u, 'title': t or u, 'timestamp': d or 0, 'visits': max(1, n or 1)} for u,t,d,n in rows if web_url(u)]
             elif kind == 'tabs':
-                if browser == 'Firefox':
+                if is_firefox(browser):
                     candidates = [path/'sessionstore-backups/recovery.jsonlz4', path/'sessionstore.jsonlz4', path/'sessionstore-backups/previous.jsonlz4']
                     source = next((p for p in candidates if p.exists()), None)
                     if source is None: raise ValueError(localized('Keine gespeicherte Firefox-Sitzung gefunden.', 'No saved Firefox session found.'))
@@ -455,7 +473,7 @@ def profile_data(browser, path, kinds):
                 else:
                     result[kind] = saved_chromium_tabs(path)
             elif kind == 'cookies':
-                if browser == 'Firefox':
+                if is_firefox(browser):
                     columns = {r[1] for r in query(path/'cookies.sqlite', 'PRAGMA table_info(moz_cookies)')}
                     same_site = 'sameSite' if 'sameSite' in columns else 'NULL'
                     rows = query(path/'cookies.sqlite', f'SELECT name,value,host,path,expiry,isSecure,isHttpOnly,{same_site} FROM moz_cookies WHERE originAttributes = "" LIMIT 100000')
@@ -543,10 +561,12 @@ def firefox_passwords(path, primary_password=''):
     """Use Firefox's NSS in a short-lived process, with a read-only profile."""
     import base64
     import ctypes as c
-    candidates = [Path('/Applications/Firefox.app/Contents/MacOS'), Path.home()/'Applications/Firefox.app/Contents/MacOS', Path('/Applications/Firefox Developer Edition.app/Contents/MacOS')]
+    # Zen is built on Firefox and ships the same NSS, so either app can open the other's store.
+    candidates = [Path('/Applications/Firefox.app/Contents/MacOS'), Path.home()/'Applications/Firefox.app/Contents/MacOS', Path('/Applications/Firefox Developer Edition.app/Contents/MacOS'),
+                  Path('/Applications/Zen.app/Contents/MacOS'), Path.home()/'Applications/Zen.app/Contents/MacOS']
     library = next((p for p in candidates if (p/'libnss3.dylib').is_file()), None)
     if library is None:
-        raise ValueError(localized('Für die direkte Übernahme muss Firefox auf diesem Mac installiert sein. Alternativ eine Passwort-CSV verwenden.', 'Firefox must be installed on this Mac for direct transfer. Alternatively, use a password CSV.'))
+        raise ValueError(localized('Für die direkte Übernahme muss Firefox oder Zen auf diesem Mac installiert sein. Alternativ eine Passwort-CSV verwenden.', 'Firefox or Zen must be installed on this Mac for direct transfer. Alternatively, use a password CSV.'))
     try:
         if (library/'libmozglue.dylib').exists():
             c.CDLL(str(library/'libmozglue.dylib'), mode=c.RTLD_GLOBAL)

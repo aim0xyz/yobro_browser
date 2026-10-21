@@ -127,4 +127,23 @@ final class BrowserImportTests: XCTestCase {
         XCTAssertTrue(try PasswordVault.store(second, home: home, replace: true))
         XCTAssertEqual(try PasswordVault.entries(home: home).first?.password, second.password)
     }
+    func testPasswordVaultDeleteRemovesLoginAndToleratesMissingItem() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { SecItemDelete([kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:PasswordVault.service(home: home)] as CFDictionary) }
+        let entry = ImportPassword(url: "https://yobro-test.invalid/login", username: "synthetic", password: "synthetic-only")
+        XCTAssertEqual(PasswordVault.account(for: entry), "https://yobro-test.invalid:443|synthetic")
+        XCTAssertTrue(try PasswordVault.store(entry, home: home, replace: false))
+        try PasswordVault.delete(entry, home: home)
+        XCTAssertTrue(try PasswordVault.entries(home: home).isEmpty)
+        XCTAssertNoThrow(try PasswordVault.delete(entry, home: home))
+    }
+    func testChromiumSafeStorageServiceNames() {
+        XCTAssertEqual(NativePasswordImport.safeStorageService(browser: "Edge"), "Microsoft Edge Safe Storage")
+        XCTAssertEqual(NativePasswordImport.safeStorageService(browser: "Vivaldi"), "Vivaldi Safe Storage")
+        XCTAssertEqual(NativePasswordImport.safeStorageService(browser: "Chrome"), "Chrome Safe Storage")
+        XCTAssertNil(NativePasswordImport.safeStorageService(browser: "Firefox"))
+        XCTAssertNil(NativePasswordImport.safeStorageService(browser: "Unknown"))
+        XCTAssertEqual(ImportBrowser.named("Zen")?.family, .firefox)
+        XCTAssertEqual(Set(ImportBrowser.all.map(\.name)).count, ImportBrowser.all.count)
+    }
 }

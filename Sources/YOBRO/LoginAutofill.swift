@@ -46,7 +46,19 @@ final class LoginAutofill: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let tab, let owner = tab.owner,
+        Self.target(for: message.webView, owner: self)?.receive(message)
+    }
+
+    /// Popups share their opener's content controller, so their messages
+    /// arrive at the opener's handler. Route them to the popup tab's own
+    /// autofill; private tabs never collect logins.
+    static func target(for webView: WKWebView?, owner: LoginAutofill) -> LoginAutofill? {
+        guard let tab = (webView as? AppearanceWebView)?.tab, tab !== owner.tab else { return owner }
+        return tab.isPrivate ? nil : tab.logins
+    }
+
+    private func receive(_ message: WKScriptMessage) {
+        guard let tab, message.webView === tab.webView, let owner = tab.owner,
               owner.activeID == tab.id, !owner.agentTabIDs.contains(tab.id),
               let origin = Self.origin(message.frameInfo.request.url),
               let pageOrigin = Self.origin(tab.webView.url),
@@ -77,6 +89,10 @@ final class LoginAutofill: NSObject, ObservableObject, WKScriptMessageHandler {
     /// Keychain. A different password for the same account still offers an
     /// update, and a later login attempt replaces an unconfirmed earlier one.
     func considerForSaving(_ entry: ImportPassword, home: URL) {
+        if LoginNeverList.contains(entry.url, home: home) {
+            pending = nil
+            return
+        }
         do {
             if try PasswordVault.entries(home: home, origin: entry.url).contains(where: {
                 $0.username == entry.username && $0.password == entry.password
@@ -105,6 +121,22 @@ final class LoginAutofill: NSObject, ObservableObject, WKScriptMessageHandler {
             self.pending = nil
             message = nil
         } catch { message = error.localizedDescription }
+    }
+
+    /// Stops offering to save logins for the pending login's website.
+    func never() {
+        guard let pending, let home = tab?.owner?.home else { return }
+        do {
+            try LoginNeverList.add(pending.entry.url, home: home)
+            self.pending = nil
+            message = nil
+        } catch { message = error.localizedDescription }
+    }
+
+    /// Focusing a login field asks for suggestions on every page. Only a
+    /// click on the key explains that nothing is saved or that reading failed.
+    nonisolated static func shouldPresent(automatic: Bool, entries: [ImportPassword], error: String?) -> Bool {
+        !automatic || (error == nil && !entries.isEmpty)
     }
 
     func accounts() throws -> [ImportPassword] {
@@ -152,10 +184,13 @@ struct LoginAutofillButton: View {
     @State private var entries: [ImportPassword] = []
     @State private var message: String?
 
-    private func showSuggestions() {
-        entries = []
-        message = nil
-        do { entries = try login.accounts() } catch { message = error.localizedDescription }
+    private func showSuggestions(automatic: Bool = false) {
+        var loaded: [ImportPassword] = []
+        var failure: String?
+        do { loaded = try login.accounts() } catch { failure = error.localizedDescription }
+        guard LoginAutofill.shouldPresent(automatic: automatic, entries: loaded, error: failure) else { return }
+        entries = loaded
+        message = failure
         presented = true
     }
 
@@ -183,7 +218,7 @@ struct LoginAutofillButton: View {
             }.padding(18).frame(width: 300).background(paper)
         }
         .onChange(of: login.suggestionRequest) { _, request in
-            if request != nil { showSuggestions() }
+            if request != nil { showSuggestions(automatic: true) }
         }
         .onChange(of: presented) { _, value in if !value { entries = []; message = nil } }
         .onDisappear { entries = [] }
@@ -202,6 +237,8 @@ struct LoginSavePrompt: View {
                 if let message = login.message { Text(message).font(.caption).foregroundStyle(.red) }
                 HStack {
                     Button(L("Nicht jetzt", "Not now")) { login.pending = nil }
+                    Button(L("Nie für diese Website", "Never for this website")) { login.never() }
+                        .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button(L("Speichern", "Save")) { login.save() }.buttonStyle(.borderedProminent)
                 }
@@ -209,5 +246,28 @@ struct LoginSavePrompt: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(ink.opacity(0.15)))
                 .shadow(color: .black.opacity(0.2), radius: 16, y: 6).padding(12)
         }
+    }
+}
+
+/// Websites the user excluded from the save prompt, stored per profile as
+/// sorted `LoginAutofill.origin` strings.
+enum LoginNeverList {
+    static func file(home: URL) -> URL { home.appendingPathComponent("login-never.json") }
+
+    static func all(home: URL) -> [String] {
+        guard let data = try? Data(contentsOf: file(home: home)),
+              let origins = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return origins
+    }
+
+    static func contains(_ origin: String, home: URL) -> Bool { all(home: home).contains(origin) }
+
+    static func add(_ origin: String, home: URL) throws { try write(Set(all(home: home)).union([origin]), home: home) }
+
+    static func remove(_ origin: String, home: URL) throws { try write(Set(all(home: home)).subtracting([origin]), home: home) }
+
+    private static func write(_ origins: Set<String>, home: URL) throws {
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try JSONEncoder().encode(origins.sorted()).write(to: file(home: home), options: [.atomic, .completeFileProtection])
     }
 }

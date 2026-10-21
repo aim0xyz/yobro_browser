@@ -40,7 +40,7 @@ struct BrowserSettings: View {
                     }
                 }.padding(.horizontal, 10)
                 Spacer()
-                Label(L("Privat verschlüsselt", "Privately encrypted"), systemImage: "lock.fill")
+                Label(L("Daten bleiben auf diesem Mac", "Your data stays on this Mac"), systemImage: "internaldrive")
                     .font(.system(size: 9)).foregroundStyle(.secondary).padding(18)
             }
             .frame(width: 190).background(YOBROTheme.chromeBottom.opacity(0.5))
@@ -124,6 +124,7 @@ final class DefaultBrowserSettings: ObservableObject {
 struct GeneralSettings: View {
     @ObservedObject var model: BrowserModel
     @StateObject private var defaultBrowser = DefaultBrowserSettings()
+    @AppStorage(SearchEngine.defaultsKey) private var searchEngine: SearchEngine = .duckDuckGo
 
     var body: some View {
         ScrollView {
@@ -155,6 +156,18 @@ struct GeneralSettings: View {
                             .font(.system(size: 10)).foregroundStyle(.red)
                     }
                 }.yobroCard(padding: 16, emphasized: true)
+
+                YOBROSettingsHeading(
+                    icon: "magnifyingglass",
+                    title: L("Suchmaschine", "Search engine"),
+                    detail: L("Was du in die Adresszeile tippst und keine Adresse ist, wird hier gesucht.", "Text you type in the address bar that is not an address is searched here.")
+                )
+                Picker(L("Suchen mit", "Search with"), selection: $searchEngine) {
+                    ForEach(SearchEngine.allCases) { Text($0.name).tag($0) }
+                }
+                .pickerStyle(.menu).fixedSize()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .yobroCard(padding: 16)
 
                 YOBROSettingsHeading(
                     icon: "bolt.badge.clock",
@@ -261,7 +274,11 @@ struct AdBlockSettings: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                ExtensionSettings(store: model.extensions, model: model)
+                IncludedBrowserFeatures(store: model.extensions, appearance: model.webAppearance)
+                Button(L("Erweiterungen verwalten …", "Manage extensions …"), systemImage: "puzzlepiece.extension") {
+                    model.settingsSection = L("Erweiterungen")
+                }
+                .buttonStyle(YOBROButtonStyle()).font(.system(size: 11))
                 WebsiteDataSettings(model: model)
                 BridgeAccessSettings(model: model)
             }
@@ -480,7 +497,7 @@ struct BrowserImportView: View {
             VStack(alignment: .leading, spacing: 16) {
                 YOBROSettingsHeading(icon: "square.and.arrow.down", title: L("Deine Daten ziehen mit um", "Bring your data with you"), detail: L("Wähle Browser, Profil und Datenarten. Erst „Auswahl importieren“ verändert dein YoBro-Profil.", "Choose a browser, profile, and data types. Nothing changes until you select Import."))
                 HStack {
-                    Picker("Browser", selection: $store.browser) { ForEach(["Safari", "Arc", "Brave", "Chrome", "Firefox"], id: \.self) { Text($0) } }.frame(width: 190)
+                    Picker("Browser", selection: $store.browser) { ForEach(ImportBrowser.all) { Text($0.name).tag($0.name) } }.frame(width: 190)
                     Picker(L("Profil"), selection: Binding(get: { store.profileID }, set: { store.selectProfile($0) })) {
                         Text(L("Profil wählen")).tag("")
                         ForEach(store.matchingProfiles) { Text($0.name).tag($0.id) }
@@ -509,7 +526,7 @@ struct BrowserImportView: View {
                     }
                     if store.needsPrimaryPassword {
                         HStack {
-                            SecureField(L("Firefox-Hauptpasswort", "Firefox Primary Password"), text: $primaryPassword)
+                            SecureField(L("\(store.browser)-Hauptpasswort", "\(store.browser) Primary Password"), text: $primaryPassword)
                             Button(L("Entsperren", "Unlock")) {
                                 let password = primaryPassword; primaryPassword = ""
                                 Task { await store.unlockPasswords(primaryPassword: password) }
@@ -615,54 +632,144 @@ struct PasswordSettings: View {
     @State private var entries: [ImportPassword] = []
     @State private var message: String?
     @State private var loaded = false
+    @State private var query = ""
+    @State private var deleting: ImportPassword?
+    @State private var neverSave: [String] = []
+
+    private var visible: [ImportPassword] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return entries }
+        return entries.filter { $0.host.localizedCaseInsensitiveContains(needle) || $0.username.localizedCaseInsensitiveContains(needle) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             PasskeySettings()
             YOBROSettingsHeading(icon: "key.fill", title: L("Passwörter im macOS-Schlüsselbund", "Passwords in macOS Keychain"), detail: L("Gespeicherte und importierte Passwörter liegen verschlüsselt im Schlüsselbund. Über den Schlüssel in der URL-Leiste kannst du sie auf der passenden Website ausfüllen.", "Saved and imported passwords are encrypted in Keychain. Use the key in the address bar to fill them on the matching website."))
-            Button(L("Gespeicherte Konten laden")) {
-                do { entries = try PasswordVault.entries(home: model.home); loaded = true; message = nil } catch { message = error.localizedDescription }
+            HStack {
+                Button(L("Gespeicherte Konten laden")) { load() }
+                if loaded && !entries.isEmpty {
+                    TextField(L("Konten suchen", "Search accounts"), text: $query).frame(maxWidth: 260)
+                }
             }
             if let message { Text(message).font(.caption) }
             ScrollView {
                 LazyVStack(alignment: .leading) {
-                    ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    ForEach(visible, id: \.rowID) { entry in
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(URL(string: entry.url)?.host ?? entry.url).font(.system(size: 12, weight: .medium))
+                                Text(entry.host).font(.system(size: 12, weight: .medium))
                                 Text(entry.username).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button(L("Benutzername kopieren")) { copy(entry.username) }
                             Button(L("Passwort kopieren")) { copy(entry.password) }
+                            Button { deleting = entry } label: { Image(systemName: "trash") }
+                                .buttonStyle(YOBROButtonStyle())
+                                .yobroHelp(L("Login löschen", "Delete login"))
+                                .accessibilityLabel(L("Login löschen", "Delete login"))
                         }.yobroCard(padding: 12)
                     }
                     if loaded && entries.isEmpty { Text(L("Noch keine Passwörter importiert.")).foregroundStyle(.secondary) }
+                    if !entries.isEmpty && visible.isEmpty { Text(L("Keine passenden Konten.", "No matching accounts.")).foregroundStyle(.secondary) }
+                    if !neverSave.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(L("Nie speichern für", "Never save for")).font(.system(size: 12, weight: .semibold))
+                            ForEach(neverSave, id: \.self) { origin in
+                                HStack {
+                                    Text(URL(string: origin)?.host ?? origin).font(.system(size: 11))
+                                    Spacer()
+                                    Button { allowSaving(origin) } label: { Image(systemName: "xmark.circle") }
+                                        .buttonStyle(YOBROButtonStyle())
+                                        .yobroHelp(L("Wieder Speichern anbieten", "Offer saving again"))
+                                        .accessibilityLabel(L("Wieder Speichern anbieten", "Offer saving again"))
+                                }
+                            }
+                        }.yobroCard(padding: 12).padding(.top, 8)
+                    }
                 }
             }
-        }.onDisappear { entries = [] }
-    }
-    private func copy(_ value: String) {
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
-        let change = NSPasteboard.general.changeCount
-        message = L("Kopiert. Die Zwischenablage wird nach 30 Sekunden geleert, sofern sie unverändert ist.")
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            if NSPasteboard.general.changeCount == change { NSPasteboard.general.clearContents() }
         }
+        .overlay {
+            if let entry = deleting {
+                YOBRODialogOverlay(
+                    icon: "trash.fill",
+                    title: L("Login löschen?", "Delete login?"),
+                    message: "\(entry.host) · \(entry.username)",
+                    confirmTitle: L("Löschen", "Delete"),
+                    cancelTitle: L("Abbrechen"),
+                    destructive: true,
+                    confirm: { deleting = nil; delete(entry) },
+                    cancel: { deleting = nil }
+                )
+            }
+        }
+        .onAppear { neverSave = LoginNeverList.all(home: model.home) }
+        .onDisappear { entries = []; deleting = nil }
+    }
+
+    private func load() {
+        do {
+            entries = try PasswordVault.entries(home: model.home).sorted {
+                ($0.host.lowercased(), $0.username.lowercased()) < ($1.host.lowercased(), $1.username.lowercased())
+            }
+            loaded = true; message = nil
+        } catch { message = error.localizedDescription }
+    }
+
+    private func delete(_ entry: ImportPassword) {
+        do {
+            try PasswordVault.delete(entry, home: model.home)
+            entries.removeAll { $0.rowID == entry.rowID }
+        } catch { message = error.localizedDescription }
+    }
+
+    private func allowSaving(_ origin: String) {
+        do {
+            try LoginNeverList.remove(origin, home: model.home)
+            neverSave = LoginNeverList.all(home: model.home)
+        } catch { message = error.localizedDescription }
+    }
+
+    private func copy(_ value: String) {
+        SecretPasteboard.copy(value)
+        message = L("Kopiert. Die Zwischenablage wird nach 30 Sekunden geleert, sofern sie unverändert ist.")
     }
 }
 
-struct ExtensionToolbar: View {
-    @ObservedObject var store: ExtensionStore
-    @ObservedObject var model: BrowserModel
-    var body: some View {
-        Menu {
-            ForEach(store.entries.filter { $0.enabled && store.errors[$0.id] == nil }) { entry in
-                Button(entry.name) { store.perform(entry, tab: model.active) }
+private extension ImportPassword {
+    var host: String { URL(string: url)?.host ?? url }
+    var rowID: String { url + "\n" + username }
+}
+
+/// Copies a secret so it stays on this Mac: no Universal Clipboard, and
+/// marked concealed for clipboard managers. It is cleared after 30 seconds
+/// and when YoBro quits, unless something else was copied since.
+@MainActor
+enum SecretPasteboard {
+    private static var copiedChange: Int?
+    private static var terminationObserver: NSObjectProtocol?
+
+    static func copy(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.prepareForNewContents(with: .currentHostOnly)
+        pasteboard.setString(value, forType: .string)
+        pasteboard.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+        let change = pasteboard.changeCount
+        copiedChange = change
+        if terminationObserver == nil {
+            terminationObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { clearIfUnchanged() }
             }
-            Divider()
-            Button(L("Erweiterungen und Import …")) { model.showSettings = true }
-        } label: { Image(systemName: "puzzlepiece.extension").frame(width: 30, height: 36) }
-            .menuStyle(.borderlessButton).fixedSize().yobroHelp(L("Erweiterungen"))
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            if pasteboard.changeCount == change { pasteboard.clearContents() }
+        }
+    }
+
+    private static func clearIfUnchanged() {
+        guard let copiedChange, NSPasteboard.general.changeCount == copiedChange else { return }
+        NSPasteboard.general.clearContents()
     }
 }

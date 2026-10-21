@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import Security
 
 struct LocalBrowserProfile: Codable, Identifiable, Equatable {
     // The original profile keeps its existing files and WebKit store.
@@ -96,8 +97,51 @@ final class BrowserProfiles: ObservableObject {
         models[id] = next
         next.profileSession = self; next.isProfileActive = true
         next.showSettings = false; next.showProfileEditor = false
+        // Layout preferences are app-wide, but a profile opened earlier still
+        // holds the values it read when it was created.
+        let defaults = UserDefaults.standard
+        let tabsOnTop = defaults.bool(forKey: "YOBRO.tabsOnTop")
+        let showSidebar = defaults.object(forKey: "YOBRO.showSidebar") as? Bool ?? true
+        let autoSuspend = defaults.object(forKey: "YOBRO.autoSuspendInactiveTabs") as? Bool ?? true
+        if next.tabsOnTop != tabsOnTop { next.tabsOnTop = tabsOnTop }
+        if next.showSidebar != showSidebar { next.showSidebar = showSidebar }
+        if next.autoSuspendInactiveTabs != autoSuspend { next.autoSuspendInactiveTabs = autoSuspend }
         browser = next
         observeBrowser()
+    }
+    /// Removes a profile with its tabs, bookmarks, website data, logins and
+    /// agent links. The original profile cannot be deleted.
+    func delete(_ id: UUID) throws {
+        guard id != LocalBrowserProfile.originalID else {
+            throw YOBROError.message(L("Das ursprüngliche Profil kann nicht gelöscht werden.", "The original profile cannot be deleted."))
+        }
+        guard let profile = registry.profiles.first(where: { $0.id == id }) else { return }
+        if id == registry.activeID { try switchTo(LocalBrowserProfile.originalID) }
+        var updated = registry
+        updated.profiles.removeAll { $0.id == id }
+        try save(updated)
+        // Dropping the model releases its control bridge, which unlinks the socket.
+        models.removeValue(forKey: id)?.isProfileActive = false
+        let home = profile.home(in: root)
+        for service in [PasswordVault.service(home: home), AgentAPIKeySecrets.service(home: home)] {
+            SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary)
+        }
+        let socketName = "p-\(id.uuidString).sock"
+        for client in AgentClient.allCases where AgentConnectionBinding.read(client: client, root: root)?.socketName == socketName {
+            try? FileManager.default.removeItem(at: AgentConnectionBinding.file(client: client, root: root))
+        }
+        var failure: Error?
+        if FileManager.default.fileExists(atPath: home.path) {
+            do { try FileManager.default.removeItem(at: home) } catch { failure = error }
+        }
+        // WebKit frees the store only after the profile's last web view is gone.
+        Task.detached {
+            for attempt in 1...20 {
+                do { try await WKWebsiteDataStore.remove(forIdentifier: id); return }
+                catch { if attempt < 20 { try? await Task.sleep(nanoseconds: 250_000_000) } }
+            }
+        }
+        if let failure { throw failure }
     }
     private func observeBrowser() {
         browserChanges = browser.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
@@ -112,6 +156,7 @@ struct ProfileEditor: View {
     @State private var name = ""
     @State private var symbol = BrowserProfiles.symbols[0]
     @State private var error: String?
+    @State private var confirmingDelete = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(creating ? L("Neues Profil", "New profile") : L("Profil bearbeiten", "Edit profile")).font(.title2)
@@ -130,6 +175,10 @@ struct ProfileEditor: View {
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button(L("Abbrechen", "Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                if !creating && !profiles.active.isOriginal {
+                    Button(L("Profil löschen …", "Delete profile …"), role: .destructive) { confirmingDelete = true }
+                        .foregroundStyle(.red)
+                }
                 Spacer()
                 Button(creating ? L("Profil erstellen", "Create profile") : L("Speichern", "Save")) {
                     do {
@@ -141,6 +190,25 @@ struct ProfileEditor: View {
             }
         }.padding(24).frame(width: 420).background(paper).foregroundStyle(ink)
             .textFieldStyle(YOBROTextFieldStyle()).tint(moss)
+            .overlay {
+                if confirmingDelete {
+                    YOBRODialogOverlay(
+                        icon: "trash.fill",
+                        title: L("Profil „\(profiles.active.name)“ löschen?", "Delete profile “\(profiles.active.name)”?"),
+                        message: L("Die Anmeldungen, Tabs, Lesezeichen und Passwörter dieses Profils werden von diesem Mac entfernt.", "This profile's logins, tabs, bookmarks and passwords will be removed from this Mac."),
+                        confirmTitle: L("Löschen", "Delete"),
+                        cancelTitle: L("Abbrechen", "Cancel"),
+                        destructive: true,
+                        confirm: {
+                            let id = profiles.active.id
+                            confirmingDelete = false
+                            dismiss()
+                            do { try profiles.delete(id) } catch { profiles.browser.notice = error.localizedDescription }
+                        },
+                        cancel: { confirmingDelete = false }
+                    )
+                }
+            }
             .onAppear { if !creating { name = profiles.active.name; symbol = profiles.active.symbol } }
     }
 }

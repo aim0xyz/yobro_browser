@@ -23,6 +23,28 @@ final class DistributionSetupTests: XCTestCase {
         XCTAssertFalse(AgentAccessPermission.load(home: root).allowed)
     }
 
+    @MainActor
+    func testAccessToggleShowsWheneverAnAgentIsLinked() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let previous = getenv("YOBRO_HOME").map { String(cString: $0) }
+        setenv("YOBRO_HOME", root.path, 1)
+        defer {
+            if let previous { setenv("YOBRO_HOME", previous, 1) } else { unsetenv("YOBRO_HOME") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let model = BrowserModel(root: root)
+        let view = AgentConnectionsView(model: model)
+        XCTAssertFalse(view.isBound(.codex))
+        XCTAssertFalse(view.showsAccessToggle)
+        try AgentConnectionBinding.save(client: .codex, socket: model.controlSocketURL)
+        XCTAssertTrue(view.isBound(.codex))
+        XCTAssertFalse(view.isBound(.claude))
+        XCTAssertTrue(view.showsAccessToggle, "Access must stay switchable while Claude is the picked agent")
+        try FileManager.default.removeItem(at: AgentConnectionBinding.file(client: .codex, root: root))
+        model.agentEnabled = true
+        XCTAssertTrue(view.showsAccessToggle, "Granted access must always be visible so it can be revoked")
+    }
+
     func testConnectionStoresOnlySocketBasenameAndPrivatePermissions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

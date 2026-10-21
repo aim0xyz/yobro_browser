@@ -39,8 +39,32 @@ enum ImportKind: String, CaseIterable, Identifiable {
         switch self { case .bookmarks: return L("Lesezeichen"); case .history: return L("Verlauf"); case .tabs: return L("Offene Tabs"); case .passwords: return L("Passwörter"); case .cookies: return "Cookies / Logins" }
     }
     var format: String {
-        switch self { case .bookmarks: return L("Lesezeichen-HTML, Chromium-JSON oder Safari-Plist"); case .history: return L("JSON mit URL, Titel und Unix-Zeitstempel; auch Chrome-Takeout"); case .tabs: return L("URL-Liste (TXT), Tab-JSON oder Firefox JSONLZ4"); case .passwords: return L("Passwort-CSV aus Safari, Arc, Brave, Chrome oder Firefox"); case .cookies: return L("Netscape-Cookie-TXT oder Cookie-JSON; Logins können trotzdem eine neue Anmeldung verlangen") }
+        switch self { case .bookmarks: return L("Lesezeichen-HTML, Chromium-JSON oder Safari-Plist"); case .history: return L("JSON mit URL, Titel und Unix-Zeitstempel; auch Chrome-Takeout"); case .tabs: return L("URL-Liste (TXT), Tab-JSON oder Firefox JSONLZ4"); case .passwords: return L("Passwort-CSV aus Safari, Arc, Brave, Chrome, Edge, Vivaldi, Firefox oder Zen"); case .cookies: return L("Netscape-Cookie-TXT oder Cookie-JSON; Logins können trotzdem eine neue Anmeldung verlangen") }
     }
+}
+
+/// A browser YoBro imports from. The family decides how the worker reads its
+/// profile; Chromium browsers also name the Keychain item that protects
+/// their passwords. Names match the `browser` values of BrowserImport.py.
+struct ImportBrowser: Identifiable {
+    enum Family { case safari, chromium, firefox }
+    let name: String
+    let family: Family
+    var safeStorage: String? = nil
+    var id: String { name }
+
+    static let all: [ImportBrowser] = [
+        ImportBrowser(name: "Safari", family: .safari),
+        ImportBrowser(name: "Arc", family: .chromium, safeStorage: "Arc Safe Storage"),
+        ImportBrowser(name: "Brave", family: .chromium, safeStorage: "Brave Safe Storage"),
+        ImportBrowser(name: "Chrome", family: .chromium, safeStorage: "Chrome Safe Storage"),
+        ImportBrowser(name: "Edge", family: .chromium, safeStorage: "Microsoft Edge Safe Storage"),
+        ImportBrowser(name: "Vivaldi", family: .chromium, safeStorage: "Vivaldi Safe Storage"),
+        ImportBrowser(name: "Firefox", family: .firefox),
+        ImportBrowser(name: "Zen", family: .firefox)
+    ]
+
+    static func named(_ name: String) -> ImportBrowser? { all.first { $0.name == name } }
 }
 
 // Worker output is kept in memory; imported secrets are never written into logs or YOBRO JSON files.
@@ -207,7 +231,7 @@ final class BrowserImportStore: ObservableObject {
             let result = try await NativePasswordImport.load(browser: browser, profile: profileID, primaryPassword: primaryPassword)
             if result.needsPrimaryPassword == true {
                 needsPrimaryPassword = true
-                passwordMessage = L("Firefox benötigt dein Hauptpasswort.", "Firefox requires your Primary Password.")
+                passwordMessage = L("\(browser) benötigt dein Hauptpasswort.", "\(browser) requires your Primary Password.")
                 return
             }
             nativePasswords = result.passwords; nativeWarnings = result.warnings
@@ -350,9 +374,14 @@ extension BrowserModel {
 
 enum PasswordVault {
     static func service(home: URL) -> String { "YOBRO.Passwords." + home.path }
+    /// The Keychain account of a login: its origin with an explicit port, then
+    /// the username. Nil for anything that is not an HTTP(S) address.
+    static func account(for entry: ImportPassword) -> String? {
+        guard let url = URL(string: entry.url), let host = url.host, let scheme = url.scheme, ["http", "https"].contains(scheme) else { return nil }
+        return "\(scheme)://\(host):\(url.port ?? (scheme == "https" ? 443 : 80))|\(entry.username)"
+    }
     static func store(_ entry: ImportPassword, home: URL, replace: Bool) throws -> Bool {
-        guard let url = URL(string: entry.url), let host = url.host, ["http", "https"].contains(url.scheme ?? "") else { return false }
-        let account = "\(url.scheme!)://\(host):\(url.port ?? (url.scheme == "https" ? 443 : 80))|\(entry.username)"
+        guard let account = account(for: entry), let host = URL(string: entry.url)?.host else { return false }
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service(home: home), kSecAttrAccount as String: account]
         // Every other secret in YOBRO is stored ThisDeviceOnly. Without this
         // the login items were the only ones that could travel into a backup
@@ -369,6 +398,15 @@ enum PasswordVault {
             guard updated == errSecSuccess else { throw YOBROError.message(SecCopyErrorMessageString(updated, nil) as String? ?? L("Schlüsselbundfehler")) }
         } else if status != errSecSuccess { throw YOBROError.message(SecCopyErrorMessageString(status, nil) as String? ?? L("Schlüsselbundfehler")) }
         return true
+    }
+    /// Removes a saved login. A login that is already gone counts as removed.
+    static func delete(_ entry: ImportPassword, home: URL) throws {
+        guard let account = account(for: entry) else { return }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service(home: home), kSecAttrAccount as String: account]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw YOBROError.message(SecCopyErrorMessageString(status, nil) as String? ?? L("Schlüsselbundfehler"))
+        }
     }
     /// `skipUnreadable` omits single entries that cannot be read instead of
     /// failing the whole list, for callers that only need a best effort.
