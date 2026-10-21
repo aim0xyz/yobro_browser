@@ -42,15 +42,19 @@ if /usr/bin/otool -L "$APP/Contents/MacOS/YOBRO" | /usr/bin/grep -q '@rpath/Spar
 fi
 python3 scripts/verify-runtime-linkage.py "$APP"
 mkdir -p "$APP/Contents/Resources/YOBRO_YOBRO.bundle" "$APP/Contents/Resources/YOBRO_YOBROMCP.bundle"
+# Newer SwiftPM versions lay resource bundles out as Contents/Resources;
+# the app keeps the flat layout either way.
+RESOURCES="$BUILD_BIN/YOBRO_YOBRO.bundle"
+if [ -d "$RESOURCES/Contents/Resources" ]; then RESOURCES="$RESOURCES/Contents/Resources"; fi
 # Explicit allowlist. Never copy the checkout, a home directory or runtime state.
 for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js \
   DarkReader-LICENSE.txt English.json YOBROMark.png LoginAutofill.js \
   uBlockOriginLite.safari.zip uBlockOriginLite-NOTICE.txt; do
-  cp "$BUILD_BIN/YOBRO_YOBRO.bundle/$resource" "$APP/Contents/Resources/YOBRO_YOBRO.bundle/$resource"
+  cp "$RESOURCES/$resource" "$APP/Contents/Resources/YOBRO_YOBRO.bundle/$resource"
 done
 cp Sources/YOBROMCP/Resources/tools.json "$APP/Contents/Resources/YOBRO_YOBROMCP.bundle/"
 for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js DarkReader-LICENSE.txt; do
-  cp "$BUILD_BIN/YOBRO_YOBRO.bundle/$resource" "$APP/Contents/Resources/$resource"
+  cp "$RESOURCES/$resource" "$APP/Contents/Resources/$resource"
 done
 cp bin/yobro "$APP/Contents/MacOS/yobroctl"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
