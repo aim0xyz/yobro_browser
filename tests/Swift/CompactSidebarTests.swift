@@ -348,10 +348,15 @@ final class CompactSidebarTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
         window.contentView = NSHostingView(rootView: CommandBar(model: model, mode: .current))
 
-        try await Task.sleep(nanoseconds: 300_000_000)
+        // A loaded test run can take longer than a fixed delay to settle focus.
+        let length = (expected as NSString).length
+        for _ in 0..<40 {
+            if let editor = window.firstResponder as? NSTextView, editor.selectedRange().length == length { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
         let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
         XCTAssertEqual(editor.string, expected)
-        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: (expected as NSString).length))
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: length))
     }
 
     @MainActor
