@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WebKit
 
 /// Gives ordinary SwiftUI surfaces an explicit arrow cursor region. AppKit's
 /// text views otherwise leave the I-beam active when the pointer moves from an
@@ -60,13 +61,17 @@ struct YOBRODialogOverlay<Fields: View>: View {
     var confirmDisabled = false
     let confirm: () -> Void
     var cancel: () -> Void = {}
+    /// False for plain notices, which take keyboard focus away from the page
+    /// behind them. A dialog with fields focuses its own field instead.
+    var hasFields = true
     /// Optional input controls between the message and the buttons. Web dialogs
     /// use this for `window.prompt` text and HTTP authentication credentials.
     @ViewBuilder var fields: () -> Fields
+    @State private var focus = DialogFocus()
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.24).ignoresSafeArea()
+            Color.black.opacity(0.24).ignoresSafeArea().accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: icon)
@@ -94,16 +99,62 @@ struct YOBRODialogOverlay<Fields: View>: View {
                         .keyboardShortcut(.defaultAction)
                         .disabled(confirmDisabled)
                 }
+                .background {
+                    // Esc also closes a notice that only offers OK.
+                    if cancelTitle == nil {
+                        Button("", action: confirm)
+                            .keyboardShortcut(.cancelAction)
+                            .opacity(0)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
             }
             .padding(20)
             .frame(width: 390)
             .background(paper, in: RoundedRectangle(cornerRadius: 17))
             .overlay(RoundedRectangle(cornerRadius: 17).stroke(YOBROTheme.border.opacity(0.55), lineWidth: 1))
             .shadow(color: .black.opacity(0.22), radius: 30, y: 12)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
         }
         .foregroundStyle(ink)
         .transition(.opacity.combined(with: .scale(scale: 0.97)))
         .zIndex(1000)
+        .onAppear {
+            AccessibilityNotification.Announcement(message.isEmpty ? title : "\(title). \(message)").post()
+            focus.take(hasFields: hasFields)
+        }
+        .onDisappear { focus.restore() }
+    }
+}
+
+/// Remembers what had keyboard focus before an in-window dialog took it and
+/// gives it back when the dialog closes, so typed keys never reach the page.
+@MainActor
+private final class DialogFocus {
+    private weak var window: NSWindow?
+    private weak var responder: NSResponder?
+
+    func take(hasFields: Bool) {
+        guard let window = NSApp.keyWindow, let current = window.firstResponder, current !== window else { return }
+        // A focused text field answers through the window's shared field editor.
+        let owner = (current as? NSTextView).flatMap { $0.isFieldEditor ? $0.delegate as? NSResponder : nil } ?? current
+        // Fields take focus themselves; only a web page must still let go, since
+        // page dialogs pass fields for alert() and confirm() too.
+        if hasFields {
+            guard let view = owner as? NSView, sequence(first: view, next: \.superview).contains(where: { $0 is WKWebView }) else { return }
+        }
+        self.window = window
+        responder = owner
+        window.makeFirstResponder(nil)
+    }
+
+    func restore() {
+        guard let window, let responder else { return }
+        self.responder = nil
+        if let view = responder as? NSView, view.window !== window { return }
+        window.makeFirstResponder(responder)
     }
 }
 
@@ -131,6 +182,7 @@ extension YOBRODialogOverlay where Fields == EmptyView {
             confirmDisabled: confirmDisabled,
             confirm: confirm,
             cancel: cancel,
+            hasFields: false,
             fields: { EmptyView() }
         )
     }

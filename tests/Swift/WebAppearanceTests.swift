@@ -101,6 +101,7 @@ final class WebAppearanceTests: XCTestCase {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {
             UserDefaults.standard.removeObject(forKey: "YOBRO.showSidebar")
+            UserDefaults.standard.removeObject(forKey: "YOBRO.tabsOnTop")
             try? FileManager.default.removeItem(at: home)
         }
         let model = BrowserModel(root: home)
@@ -128,5 +129,15 @@ final class WebAppearanceTests: XCTestCase {
 
         model.finishSidebarDrag(sessionID: model.sidebarDragSessionID)
         XCTAssertNotNil(web.hitTest(pointInsideSidebarX))
+
+        // With tabs on top, the hidden strip slides in along the top edge, so
+        // only the top 40 points belong to the overlay.
+        model.tabsOnTop = true
+        model.sidebarOverlayVisible = true
+        let pointInTopStrip = web.convert(NSPoint(x: 100, y: 690), from: nil)
+        XCTAssertNotNil(web.hitTest(pointInsideSidebarX))
+        XCTAssertNil(web.hitTest(pointInTopStrip))
+        model.sidebarOverlayVisible = false
+        XCTAssertNotNil(web.hitTest(pointInTopStrip))
     }
 }

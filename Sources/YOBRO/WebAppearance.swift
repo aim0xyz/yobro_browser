@@ -4,6 +4,8 @@ import WebKit
 final class AppearanceWebView: WKWebView {
     weak var tab: BrowserTab?
     var agentControlled = false
+    /// Camera, microphone, audio and hovered-link state for the tab chrome.
+    lazy var signals = PageSignals(webView: self)
     private var paneClickMonitor: Any?
 
     override func viewDidMoveToWindow() {
@@ -38,11 +40,14 @@ final class AppearanceWebView: WKWebView {
     }
 
     private func shouldYieldToSidebar(at windowPoint: NSPoint) -> Bool {
-        guard let model = tab?.owner else { return false }
-        if !model.showSidebar {
+        guard let model = tab?.owner, !model.showSidebar else { return false }
+        if !model.tabsOnTop {
             if windowPoint.x <= 260 && (model.sidebarOverlayVisible || model.draggingTabID != nil || model.draggingFolderID != nil) {
                 return true
             }
+        } else if model.sidebarOverlayVisible, let height = window?.contentView?.bounds.height, windowPoint.y >= height - 40 {
+            // With tabs on top, the hidden strip slides in along the top edge.
+            return true
         }
         return false
     }
@@ -140,6 +145,9 @@ final class WebAppearance: ObservableObject {
         }.joined(separator: "\n")
     }()
     func install(on controller: WKUserContentController) {
+        // Every tab controller passes through here, private and agent tabs
+        // included; popups share their opener's controller.
+        PageSignalsScript.install(on: controller)
         guard !Self.source.isEmpty else { return }
         controller.addUserScript(WKUserScript(source: Self.source + "\nwindow.__yobroAppearance?.configure(\(json));", injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: Self.world))
     }

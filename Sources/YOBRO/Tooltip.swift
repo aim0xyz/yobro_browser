@@ -16,6 +16,13 @@ extension View {
         }
             .accessibilityHint(Text(text))
     }
+
+    /// Help for a control that shows only an icon: VoiceOver also reads the
+    /// text (or `label`) as its name. Rows whose help is a URL keep `yobroHelp`,
+    /// so the URL does not become their name.
+    func yobroIconHelp(_ text: String, label: String? = nil, placement: YOBROTooltipPlacement = .topTrailing) -> some View {
+        yobroHelp(text, placement: placement).accessibilityLabel(label ?? text)
+    }
 }
 
 private struct YOBROTooltipAnchor: NSViewRepresentable {

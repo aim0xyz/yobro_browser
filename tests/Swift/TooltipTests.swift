@@ -51,6 +51,29 @@ final class TooltipTests: XCTestCase {
         XCTAssertEqual(anchor.bounds.height, 44, accuracy: 1)
     }
 
+    func testIconHelpKeepsTooltipAnchor() async throws {
+        _ = NSApplication.shared
+        let view = NSHostingView(rootView:
+            Button {} label: { Image(systemName: "xmark").frame(width: 30, height: 30) }
+                .buttonStyle(.plain).yobroIconHelp("Close tab · ⌘W", label: "Close tab")
+                .padding(20).frame(width: 200, height: 100, alignment: .topLeading))
+        view.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
+        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        view.layoutSubtreeIfNeeded()
+        func find(_ view: NSView) -> YOBROTooltipAnchorView? {
+            if let anchor = view as? YOBROTooltipAnchorView { return anchor }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        let anchor = try XCTUnwrap(find(view))
+        XCTAssertEqual(anchor.text, "Close tab · ⌘W")
+        XCTAssertEqual(anchor.bounds.width, 30, accuracy: 1)
+    }
+
     func testFloatingHelpDoesNotInterceptClicksAndDetachesOnDismiss() throws {
         _ = NSApplication.shared
         let screen = try XCTUnwrap(NSScreen.main)

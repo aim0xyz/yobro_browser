@@ -15,6 +15,7 @@ struct LibraryView: View {
                 Text(L("Deine Bibliothek")).font(.system(size: 20, weight: .semibold))
                 Spacer()
                 Button { model.librarySection = nil } label: { Image(systemName: "xmark").padding(6) }.buttonStyle(YOBROButtonStyle()).keyboardShortcut(.cancelAction)
+                    .yobroIconHelp(L("Schließen", "Close"))
             }.padding(25)
             HStack(spacing: 4) {
                 ForEach(LibrarySection.allCases) { value in
@@ -31,6 +32,9 @@ struct LibraryView: View {
             case .downloads: downloadsView
             }
         }.frame(width: 680, height: 570).background(paper).foregroundStyle(ink)
+            // The menus set the model's section while the sheet is open; every
+            // assignment publishes, so ⌘Y returns from Downloads to History.
+            .onReceive(model.$librarySection.compactMap { $0 }) { section = $0 }
             .overlay {
                 if confirmClear {
                     YOBRODialogOverlay(icon: "clock.arrow.circlepath", title: L("Verlauf löschen?"), message: L("Die Liste besuchter Seiten wird gelöscht. Offene Tabs und Logins bleiben erhalten."), confirmTitle: L("Verlauf löschen"), cancelTitle: L("Abbrechen"), destructive: true, confirm: { confirmClear = false; model.clearHistory() }, cancel: { confirmClear = false })
@@ -59,6 +63,9 @@ struct LibraryView: View {
                                 Image(systemName: "arrow.up.right").font(.system(size: 10)).foregroundStyle(moss)
                             }.padding(12).background(YOBROTheme.surface.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
                         }.buttonStyle(YOBROButtonStyle())
+                        .contextMenu {
+                            Button(L("Aus Verlauf entfernen", "Remove from History")) { model.removeHistory(entry) }
+                        }
                     }
                 }.padding(.horizontal, 25)
             }
@@ -127,7 +134,10 @@ struct LibraryView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if downloads.entries.isEmpty { empty(L("Alles an einem Ort"), L("Deine Downloads landen im Ordner Downloads/YOBRO."), "arrow.down.circle") }
+                    if downloads.entries.isEmpty {
+                        let folder = (downloads.directory.path as NSString).abbreviatingWithTildeInPath
+                        empty(L("Alles an einem Ort"), L("Deine Downloads landen im Ordner „\(folder)“.", "Your downloads are saved in “\(folder)”."), "arrow.down.circle")
+                    }
                     ForEach(downloads.entries) { entry in
                         HStack(alignment: .top, spacing: 13) {
                             Image(systemName: entry.state == "completed" ? "doc.text" : "arrow.down.document").font(.system(size: 23)).foregroundStyle(moss).frame(width: 37).padding(.top, 4)
@@ -151,12 +161,24 @@ struct LibraryView: View {
                                 Button { downloads.reveal(entry) } label: { Image(systemName: "folder").padding(5) }.buttonStyle(YOBROButtonStyle()).yobroHelp(L("Im Finder zeigen"))
                             }
                         }.padding(16).background(YOBROTheme.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+                        .contextMenu {
+                            if entry.state == "completed" {
+                                Button(L("Öffnen", "Open")) { downloads.open(entry) }
+                                Button(L("Im Finder zeigen")) { downloads.reveal(entry) }
+                            }
+                            if entry.state != "downloading" {
+                                Button(L("Aus Liste entfernen", "Remove from List")) { downloads.remove(entry.id) }
+                            }
+                        }
                     }
                 }.padding(.horizontal, 25)
             }
             HStack {
                 Text(L("\(downloads.activeCount) aktive Downloads", "\(downloads.activeCount) active downloads")).font(.system(size: 10)).foregroundStyle(ink.opacity(0.5))
                 Spacer()
+                Button(L("Liste leeren", "Clear List")) { downloads.clearFinished() }
+                    .font(.system(size: 11)).buttonStyle(YOBROButtonStyle())
+                    .disabled(!downloads.entries.contains { $0.state != "downloading" })
                 Button(L("Downloadordner öffnen")) {
                     do { try FileManager.default.createDirectory(at: downloads.directory, withIntermediateDirectories: true); NSWorkspace.shared.open(downloads.directory) }
                     catch { model.notice = error.localizedDescription }
@@ -184,16 +206,30 @@ struct PageFindBar: View {
                 .onSubmit { Task { await tab.find(query) } }
             if let found = tab.findFound { Text(found ? L("Treffer") : L("Kein Treffer")).font(.system(size: 10)).foregroundStyle(found ? moss : .orange) }
             if let error = tab.findError { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).yobroHelp(error) }
-            Button { Task { await tab.find(tab.findQuery, backwards: true) } } label: { Image(systemName: "chevron.up") }.yobroHelp(L("Vorheriger Treffer"))
-            Button { Task { await tab.find(tab.findQuery) } } label: { Image(systemName: "chevron.down") }.yobroHelp(L("Nächster Treffer"))
+            Button { Task { await tab.find(tab.findQuery, backwards: true) } } label: { Image(systemName: "chevron.up") }.yobroIconHelp(L("Vorheriger Treffer"))
+            Button { Task { await tab.find(tab.findQuery) } } label: { Image(systemName: "chevron.down") }.yobroIconHelp(L("Nächster Treffer"))
             Button { tab.showFind = false; Task { await tab.find("") } } label: { Image(systemName: "xmark") }.keyboardShortcut(.cancelAction)
+                .yobroIconHelp(L("Suche schließen", "Close find bar"))
         }.buttonStyle(YOBROButtonStyle()).font(.system(size: 12)).padding(7)
             .background(paper, in: RoundedRectangle(cornerRadius: Chrome.radius)).overlay(RoundedRectangle(cornerRadius: Chrome.radius).strokeBorder(Chrome.hairline)).shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-            .onAppear { query = tab.findQuery; focused = true }
+            .onAppear { query = tab.findQuery; focusField() }
+            // ⌘F while the bar is open brings focus back from the page.
+            .onChange(of: tab.findFocusRequest) { _, _ in focusField() }
             .onChange(of: tab.findQuery) { _, value in query = value }
             .appearanceTask(id: query) {
                 try? await Task.sleep(nanoseconds: 180_000_000)
                 if !Task.isCancelled && query != tab.findQuery { await tab.find(query) }
             }
+    }
+
+    /// Focuses the field and selects its text, so typing replaces the last search.
+    private func focusField() {
+        focused = true
+        Task { @MainActor in
+            // The field editor takes over only once SwiftUI has applied the focus.
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            guard focused, let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.isFieldEditor else { return }
+            editor.selectAll(nil)
+        }
     }
 }

@@ -16,6 +16,7 @@ final class WindowControlsView: NSView {
     private var previouslyAcceptedMouseMoved = false
     private var hoverArea: NSTrackingArea?
     private var observers: [NSObjectProtocol] = []
+    private var forwardingClick = false
     override var intrinsicContentSize: NSSize { NSSize(width: 60, height: 32) }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -30,12 +31,17 @@ final class WindowControlsView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard let entry = originals.first(where: { $0.button.frame.contains(point) }),
+        // A button that declines the event passes it up to us, its superview.
+        guard !forwardingClick, let entry = originals.first(where: { $0.button.frame.contains(point) }),
               entry.button.isEnabled else {
             super.mouseDown(with: event)
             return
         }
-        entry.button.performClick(nil)
+        forwardingClick = true
+        defer { forwardingClick = false }
+        // Let the button track the click itself: the action fires on mouse-up
+        // inside it, dragging off cancels, and holding zoom shows the tiling menu.
+        entry.button.mouseDown(with: event)
     }
 
     override func viewDidMoveToWindow() {
@@ -129,6 +135,33 @@ final class WindowControlsView: NSView {
         returnToTitlebar()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
+    }
+}
+
+/// Empty chrome behaves like a titlebar: it moves the window, and a
+/// double-click follows the system's titlebar setting. Only the left button
+/// is handled, so context menus keep working.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowDragView { WindowDragView() }
+    func updateNSView(_ view: WindowDragView, context: Context) {}
+}
+
+/// `isMovableByWindowBackground` would also move the window from tab drags,
+/// and `windowBackgroundDragBehavior` needs macOS 15.
+final class WindowDragView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        guard event.clickCount == 2 else {
+            window.performDrag(with: event)
+            return
+        }
+        switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+        case "Minimize": window.performMiniaturize(nil)
+        case "None": break
+        default: window.performZoom(nil)
+        }
     }
 }
 

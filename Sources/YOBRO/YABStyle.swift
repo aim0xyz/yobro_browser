@@ -180,6 +180,8 @@ struct ToastSurface: ViewModifier {
             .foregroundStyle(.white.opacity(0.96))
             .environment(\.colorScheme, .dark)
             .background(Color(white: 0.11, opacity: 0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // On dark pages and the dark start page the fill alone has no edge.
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5).allowsHitTesting(false))
             .shadow(color: .black.opacity(0.2), radius: 11, y: 8)
     }
 }
