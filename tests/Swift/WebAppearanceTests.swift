@@ -100,12 +100,11 @@ final class WebAppearanceTests: XCTestCase {
     func testAppearanceWebViewHitTestYieldsOnlyWhenOverlayOrDragIsActive() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {
-            UserDefaults.standard.removeObject(forKey: "YOBRO.sidebarAutoHide")
+            UserDefaults.standard.removeObject(forKey: "YOBRO.showSidebar")
             try? FileManager.default.removeItem(at: home)
         }
         let model = BrowserModel(root: home)
         model.showSidebar = false
-        model.sidebarAutoHide = true
         model.sidebarOverlayVisible = false
 
         let tab = model.newTab()

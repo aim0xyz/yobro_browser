@@ -8,41 +8,41 @@ import UIKit
 // Shared desktop/iOS palette, resolved against the current system appearance.
 enum YOBROTheme {
     static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
+        adaptiveAlpha(name, light: (light, 1), dark: (dark, 1))
+    }
+    static func adaptiveAlpha(_ name: String, light: (UInt32, CGFloat), dark: (UInt32, CGFloat)) -> Color {
         #if os(macOS)
         Color(nsColor: NSColor(name: NSColor.Name(name)) { appearance in
-            let value = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            let (value, alpha) = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
                            green: CGFloat((value >> 8) & 255) / 255,
-                           blue: CGFloat(value & 255) / 255, alpha: 1)
+                           blue: CGFloat(value & 255) / 255, alpha: alpha)
         })
         #else
         Color(uiColor: UIColor { traits in
-            let value = traits.userInterfaceStyle == .dark ? dark : light
+            let (value, alpha) = traits.userInterfaceStyle == .dark ? dark : light
             return UIColor(red: CGFloat((value >> 16) & 255) / 255,
                            green: CGFloat((value >> 8) & 255) / 255,
-                           blue: CGFloat(value & 255) / 255, alpha: 1)
+                           blue: CGFloat(value & 255) / 255, alpha: alpha)
         })
         #endif
     }
-    static let text = adaptive("YOBRO.text", light: 0x303B3B, dark: 0xD5DED4)
-    static let accent = adaptive("YOBRO.accent", light: 0x4F6654, dark: 0xA8C6A3)
-    static let page = adaptive("YOBRO.page", light: 0xF9F8F4, dark: 0x0D1410)
-    static let surface = adaptive("YOBRO.surface", light: 0xFFFFFF, dark: 0x1A281E)
-    static let chromeTop = adaptive("YOBRO.chromeTop", light: 0xE3E6D6, dark: 0x111D16)
-    static let chromeBottom = adaptive("YOBRO.chromeBottom", light: 0xD6DED4, dark: 0x0B130E)
-    static let sage = adaptive("YOBRO.sage", light: 0xDBE6D4, dark: 0x1F3022)
-    static let lilac = adaptive("YOBRO.lilac", light: 0xE0DBEB, dark: 0x292431)
-    static let peach = adaptive("YOBRO.peach", light: 0xF2DECC, dark: 0x33271F)
+    // Neutral, near-monochrome palette. Colour comes from the Space tone.
+    static let text = adaptive("YOBRO.text", light: 0x171717, dark: 0xEDEDED)
+    static let accent = adaptive("YOBRO.accent", light: 0x2B2F36, dark: 0xE4E6EA)
+    static let page = adaptive("YOBRO.page", light: 0xFFFFFF, dark: 0x1C1C1E)
+    static let surface = adaptive("YOBRO.surface", light: 0xFFFFFF, dark: 0x2C2C2E)
+    static let chromeTop = adaptive("YOBRO.chromeTop", light: 0xF5F5F7, dark: 0x161617)
+    static let chromeBottom = adaptive("YOBRO.chromeBottom", light: 0xEFEFF2, dark: 0x121213)
     static let folderSage = adaptive("YOBRO.folderSage", light: 0x71896F, dark: 0xA7C1A3)
     static let folderLilac = adaptive("YOBRO.folderLilac", light: 0x887CA0, dark: 0xBAACCD)
     static let folderPeach = adaptive("YOBRO.folderPeach", light: 0xB47E5D, dark: 0xD6A07D)
     static let folderSky = adaptive("YOBRO.folderSky", light: 0x66888E, dark: 0x92B9BF)
     static let folderSand = adaptive("YOBRO.folderSand", light: 0x9D8756, dark: 0xCDB77D)
     static let folderRose = adaptive("YOBRO.folderRose", light: 0x997078, dark: 0xC79AA3)
-    static let field = adaptive("YOBRO.field", light: 0xF4F5EF, dark: 0x152119)
-    static let border = adaptive("YOBRO.border", light: 0xCAD3C8, dark: 0x344739)
+    static let field = adaptive("YOBRO.field", light: 0xF2F2F4, dark: 0x2A2A2C)
+    static let border = adaptive("YOBRO.border", light: 0xE2E2E6, dark: 0x3A3A3D)
     static let brandOrange = adaptive("YOBRO.brandOrange", light: 0xFF541C, dark: 0xFF6A38)
-    static let voiceListening = adaptive("YOBRO.voiceListening", light: 0x168AA8, dark: 0x54C4DE)
 }
 
 #if os(macOS)

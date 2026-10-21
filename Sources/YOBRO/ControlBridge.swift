@@ -100,6 +100,10 @@ extension BrowserModel {
         if let agentTab { return agentTab }
         return newAgentTab()
     }
+    /// Page operations serve both the control socket, gated by the user's
+    /// external-access switch, and a running in-app chat.
+    var agentOperationAllowed: Bool { isProfileActive && (agentEnabled || chat.running) }
+
     func tabInfo(_ tab: BrowserTab) -> [String: Any] {
         ["id": tab.id.uuidString.lowercased(), "title": tab.title, "url": tab.url, "space": tab.space,
          "owner": agentTabIDs.contains(tab.id) ? "agent" : "user", "agentActive": tab.id == agentTabID, "pinned": tab.pinned, "active": tab.id == activeID, "loading": tab.webView.isLoading,
@@ -109,7 +113,7 @@ extension BrowserModel {
         let deadline = Date().addingTimeInterval(20)
         try await Task.sleep(nanoseconds: 150_000_000)
         while tab.webView.isLoading && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
-        guard agentEnabled, isProfileActive else {
+        guard agentOperationAllowed else {
             throw YOBROError.message("Agent operation was paused.")
         }
         if tab.webView.isLoading { throw YOBROError.message("Seite lädt noch. Später erneut mit read prüfen.") }
@@ -142,7 +146,7 @@ extension BrowserModel {
     }
     func actOnTab(_ tab: BrowserTab, action: String, ref: String, document: String, value: String? = nil, key: String? = nil) async throws -> [String: Any] {
         try await prepare(tab)
-        guard agentEnabled, isProfileActive else { throw YOBROError.message("Agent operation was paused.") }
+        guard agentOperationAllowed else { throw YOBROError.message("Agent operation was paused.") }
         let args: [String: Any] = [
             "action": action,
             "ref": ref,
@@ -183,7 +187,13 @@ extension BrowserModel {
                     "commands": ["status", "tabs", "open", "new", "focus", "close", "read", "click", "fill", "press", "scroll", "back", "forward", "reload", "pin", "split", "find", "history", "downloads", "download", "cancel-download", "duplicate", "end"]]
         }
         guard agentEnabled else { throw YOBROError.message("Agentenzugriff ist im Browser pausiert.") }
-        if command == "tabs" { agentSessionActive = true; return ["tabs": tabs.map(tabInfo), "space": space] }
+        if command == "tabs" {
+            agentSessionActive = true
+            // Private tabs are never listed. The user's own tabs reveal what
+            // they are reading, so they share the library-access opt-in.
+            let listed = tabs.filter { !$0.isPrivate && (agentTabIDs.contains($0.id) || bridgeLibraryAccess) }
+            return ["tabs": listed.map(tabInfo), "space": space]
+        }
         if command == "end" {
             endAgentWorkspace()
             return ["ended": true]

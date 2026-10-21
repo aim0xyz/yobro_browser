@@ -37,8 +37,8 @@ final class BroPrivacySession {
         }
     }
 
-    /// Reading every stored password costs one Keychain call each. Chat and
-    /// voice need this on every request, so keep the values briefly in memory.
+    /// Reading every stored password costs one Keychain call each. The chat
+    /// needs this on every request, so keep the values briefly in memory.
     @MainActor private static var storedSecrets: [URL: (date: Date, values: [String])] = [:]
 
     @MainActor static func forBrowser(_ browser: BrowserModel) -> BroPrivacySession {
@@ -47,13 +47,11 @@ final class BroPrivacySession {
             values = cached.values
         } else {
             let logins = (try? PasswordVault.entries(home: browser.home, skipUnreadable: true)) ?? []
-            var stored = logins.map(\.password) + logins.map(\.username).filter { $0.count >= 4 }
-            stored += browser.mail.accounts.map(\.address)
-            stored += browser.mail.accounts.compactMap { try? MailSecrets.read($0.id) }
+            let stored = logins.map(\.password) + logins.map(\.username).filter { $0.count >= 4 }
             storedSecrets[browser.home] = (Date(), stored)
             values = stored
         }
-        return BroPrivacySession(knownSecrets: values + [browser.chat.apiKey, browser.voice.fishKey])
+        return BroPrivacySession(knownSecrets: values + [browser.chat.apiKey])
     }
 
     func segments(in text: String) -> [BroTextSegment] {

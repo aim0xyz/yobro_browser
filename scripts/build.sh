@@ -43,13 +43,13 @@ fi
 python3 scripts/verify-runtime-linkage.py "$APP"
 mkdir -p "$APP/Contents/Resources/YOBRO_YOBRO.bundle" "$APP/Contents/Resources/YOBRO_YOBROMCP.bundle"
 # Explicit allowlist. Never copy the checkout, a home directory or runtime state.
-for resource in AgentBridge.js MailWorker.py BrowserImport.py DarkReader.js WebAppearance.js \
-  DarkReader-LICENSE.txt English.json AdBlockerPage.js YOBROMark.png AdBlocker.js LoginAutofill.js \
-  uBlockOriginLite.safari.zip uBlockOriginLite-NOTICE.txt http2transport-yobro; do
+for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js \
+  DarkReader-LICENSE.txt English.json YOBROMark.png LoginAutofill.js \
+  uBlockOriginLite.safari.zip uBlockOriginLite-NOTICE.txt; do
   cp "$BUILD_BIN/YOBRO_YOBRO.bundle/$resource" "$APP/Contents/Resources/YOBRO_YOBRO.bundle/$resource"
 done
 cp Sources/YOBROMCP/Resources/tools.json "$APP/Contents/Resources/YOBRO_YOBROMCP.bundle/"
-for resource in AgentBridge.js MailWorker.py BrowserImport.py DarkReader.js WebAppearance.js DarkReader-LICENSE.txt; do
+for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js DarkReader-LICENSE.txt; do
   cp "$BUILD_BIN/YOBRO_YOBRO.bundle/$resource" "$APP/Contents/Resources/$resource"
 done
 cp bin/yobro "$APP/Contents/MacOS/yobroctl"
@@ -64,15 +64,13 @@ case "$(file -b "$APP/Contents/MacOS/YOBRO")" in
   *Mach-O*) ;;
   *) echo "Error: YOBRO must be a native Mach-O executable." >&2; exit 1 ;;
 esac
-for executable in "$APP/Contents/MacOS/YOBRO" "$APP/Contents/MacOS/yobro-mcp" \
-  "$APP/Contents/Resources/YOBRO_YOBRO.bundle/http2transport-yobro"; do
+for executable in "$APP/Contents/MacOS/YOBRO" "$APP/Contents/MacOS/yobro-mcp"; do
   /usr/bin/lipo "$executable" -verify_arch "$(uname -m)"
 done
 sign_app() {
   local target="$1"
   # Sign embedded executables explicitly; --deep alone can miss resource helpers.
-  for helper in "$target/Contents/MacOS/yobro-mcp" \
-    "$target/Contents/Resources/YOBRO_YOBRO.bundle/http2transport-yobro"; do
+  for helper in "$target/Contents/MacOS/yobro-mcp"; do
     if [ -n "${YOBRO_SIGN_IDENTITY:-}" ]; then
       codesign --force --options runtime --timestamp --sign "$YOBRO_SIGN_IDENTITY" "$helper"
     else

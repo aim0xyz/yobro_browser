@@ -49,20 +49,4 @@ final class DistributionSetupTests: XCTestCase {
         try JSONEncoder().encode(AgentAccessPermission(allowed: true)).write(to: file)
         XCTAssertTrue(AgentAccessPermission.load(home: root).allowed)
     }
-
-    @MainActor
-    func testVPNShipsEmptyAndMissingLegacyConfigurationDoesNotFailOpen() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let empty = ManagedVPNStore(home: root)
-        XCTAssertTrue(empty.locations.isEmpty)
-        XCTAssertFalse(empty.isActive)
-        try Data("{\"location\":\"old-location\"}".utf8).write(to: root.appendingPathComponent("managed-vpn.json"))
-        let previous = ManagedVPNStore(home: root)
-        await previous.restore(to: .nonPersistent())
-        XCTAssertTrue(previous.isActive)
-        XCTAssertNotNil(previous.isolationFailure)
-        XCTAssertFalse(previous.isConnected)
-    }
 }

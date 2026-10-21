@@ -30,9 +30,7 @@
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSCameraUsageDescription</key><string>Websites ask YoBro before they may use the camera, for example for video calls.</string>
-  <key>NSMicrophoneUsageDescription</key><string>YoBro uses the microphone for voice commands you turn on. Websites ask separately before they may use it, for example for video calls.</string>
-  <key>NSSpeechRecognitionUsageDescription</key><string>YoBro transcribes your voice commands for the agent. When on-device recognition is unavailable, Apple may process the audio.</string>
-  <key>NSAppleEventsUsageDescription</key><string>YoBro controls Spotify and the macOS appearance only when you ask the agent to.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Websites ask YoBro before they may use the microphone, for example for video calls.</string>
   <key>NSAppTransportSecurity</key><dict>
     <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
     <key>NSAllowsLocalNetworking</key><true/>

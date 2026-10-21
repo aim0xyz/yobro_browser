@@ -301,7 +301,6 @@ extension BrowserModel {
     func flushLibrary(waitForCompletion: Bool = false) {
         libraryTask?.cancel()
         libraryTask = nil
-        markSyncChanged()
         let snapshot = history
         let destination = home.appendingPathComponent("history.json")
         if waitForCompletion {

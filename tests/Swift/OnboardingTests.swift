@@ -24,8 +24,9 @@ final class OnboardingTests: XCTestCase {
         }
         model.finishOnboarding()
         XCTAssertFalse(model.showOnboarding)
-        XCTAssertEqual(model.tabs.count, 1)
-        XCTAssertEqual(model.active?.url, "")
+        // Finishing opens the address field instead of an empty tab.
+        XCTAssertTrue(model.tabs.isEmpty)
+        XCTAssertEqual(model.commandBar, .newTab)
         XCTAssertTrue(OnboardingProgress.isComplete(home:home))
     }
 }

@@ -25,7 +25,7 @@ def validate(profile, bundle_id):
             'com.apple.developer.web-browser.public-key-credential', 'com.apple.developer.web-browser']
     signed = {key: entitlements[key] for key in keys if key in entitlements}
     signed['com.apple.security.device.audio-input'] = True
-    signed['com.apple.security.automation.apple-events'] = True
+    signed['com.apple.security.device.camera'] = True
     return signed
 
 

@@ -13,12 +13,11 @@ final class CompactSidebarTests: XCTestCase {
 
         XCTAssertTrue(privateTab.isPrivate)
         XCTAssertFalse(privateTab.webView.configuration.websiteDataStore.isPersistent)
-        model.persistSession(scheduleSync: false)
+        model.persistSession()
 
         let data = try Data(contentsOf: home.appendingPathComponent("session.json"))
         let saved = try JSONDecoder().decode(StoredSession.self, from: data)
         XCTAssertEqual(saved.tabs.map(\.id), [ordinary.id])
-        XCTAssertFalse(model.syncSnapshot().tabs.contains { $0.id == privateTab.id })
 
         model.closeTab(privateTab.id)
         XCTAssertFalse(model.closedTabs.contains { $0.id == privateTab.id })
@@ -297,7 +296,7 @@ final class CompactSidebarTests: XCTestCase {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
         let model = BrowserModel(root: home)
-        model.sidebarAutoHide = true
+        defer { UserDefaults.standard.removeObject(forKey: "YOBRO.showSidebar") }
         model.showSidebar = false
         model.sidebarOverlayVisible = false
 
@@ -334,23 +333,78 @@ final class CompactSidebarTests: XCTestCase {
     }
 
     @MainActor
-    func testAddressEntrySelectsTheCompleteCurrentURL() async throws {
+    func testCommandBarPrefillsAndSelectsTheCompleteCurrentURL() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
         let model = BrowserModel(root: home)
         let expected = "https://example.com/a/long/path?query=value"
         let tab = BrowserTab(saved: StoredTab(id: UUID(), title: "Example", url: expected, space: model.space, pinned: false), owner: model, deferLoading: true)
-        let host = NSHostingView(rootView: AddressEntry(model: model, tab: tab, close: {}))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
+        model.tabs.append(tab); model.activeID = tab.id
+        // Like ⌘L in the app, the field appears in a window that is already shown.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = host
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        window.contentView = NSHostingView(rootView: CommandBar(model: model, mode: .current))
 
         try await Task.sleep(nanoseconds: 300_000_000)
         let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
         XCTAssertEqual(editor.string, expected)
         XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: (expected as NSString).length))
+    }
+
+    @MainActor
+    func testCommandBarOpensDestinationsWithoutEmptyTabs() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.openCommandBar(.current)
+        XCTAssertEqual(model.commandBar, .newTab, "⌘L without a page behaves like ⌘T")
+        XCTAssertTrue(model.tabs.isEmpty, "Opening the field must not create an empty tab")
+        let suggestions = model.commandSuggestions("example.com")
+        XCTAssertEqual(suggestions.first?.action, .go("example.com"))
+        model.perform(try XCTUnwrap(suggestions.first), mode: .newTab)
+        XCTAssertNil(model.commandBar)
+        XCTAssertEqual(model.tabs.count, 1)
+        XCTAssertEqual(model.active?.url, "https://example.com")
+        let first = try XCTUnwrap(model.active)
+        model.newTab(url: "https://second.example")
+        let switcher = model.commandSuggestions("")
+        XCTAssertTrue(switcher.contains { $0.action == .tab(first.id) }, "An empty query lists recent tabs")
+        model.perform(try XCTUnwrap(switcher.first { $0.action == .tab(first.id) }), mode: .newTab)
+        XCTAssertEqual(model.activeID, first.id)
+        XCTAssertEqual(model.tabs.count, 2)
+    }
+
+    @MainActor
+    func testSpacesGetDistinctTonesUntilTheUserPicksOne() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        let first = model.spaces[0], second = model.spaces[1]
+        XCTAssertNotEqual(model.spaceTone(for: first), model.spaceTone(for: second))
+        model.setSpaceTone(.rose, for: second)
+        try model.renameSpace(second, to: "Clients")
+        let restored = BrowserModel(root: home)
+        XCTAssertEqual(restored.spaceTone(for: "Clients"), .rose)
+    }
+
+    @MainActor
+    func testClearingTodayTabsKeepsPinnedAndFolderTabs() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Keep")
+        let folder = try XCTUnwrap(model.folders.first)
+        let pinned = model.newTab(url: "https://pinned.example"); pinned.pinned = true
+        let filed = model.newTab(url: "https://filed.example"); model.moveToFolder(filed.id, folder: folder.id)
+        let loose = model.newTab(url: "https://loose.example")
+        model.clearTodayTabs()
+        XCTAssertTrue(model.tabs.contains { $0.id == pinned.id })
+        XCTAssertTrue(model.tabs.contains { $0.id == filed.id })
+        XCTAssertFalse(model.tabs.contains { $0.id == loose.id })
+        XCTAssertEqual(model.closedTabs.last?.url, "https://loose.example")
     }
 
     @MainActor
@@ -448,7 +502,7 @@ final class CompactSidebarTests: XCTestCase {
         tab.title = "A later website title"
         XCTAssertEqual(tab.sidebarTitle, "Research")
 
-        model.persistSession(scheduleSync: false)
+        model.persistSession()
         let data = try Data(contentsOf: home.appendingPathComponent("session.json"))
         let saved = try JSONDecoder().decode(StoredSession.self, from: data)
         XCTAssertEqual(saved.tabs.first(where: { $0.id == tab.id })?.customTitle, "Research")
@@ -462,10 +516,10 @@ final class CompactSidebarTests: XCTestCase {
     }
 
     @MainActor
-    func testNewTabCreatesFocusedBrandedStartPage() async throws {
+    func testBlankTabFocusesItsInlineAddressField() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let previous = getenv("YOBRO_HOME").map { String(cString:$0) }; setenv("YOBRO_HOME",home.path,1)
-        defer { if let previous { setenv("YOBRO_HOME",previous,1) } else { unsetenv("YOBRO_HOME") }; try? FileManager.default.removeItem(at:home) }
+        defer { if let previous { setenv("YOBRO_HOME",previous,1) } else { unsetenv("YOBRO_HOME") }; try? FileManager.default.removeItem(at:home); UserDefaults.standard.removeObject(forKey: "YOBRO.showSidebar") }
         let model = BrowserModel(); model.showSidebar = false; model.showAgent = false
         let host = NSHostingView(rootView: BrowserShell(model:model))
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:740),styleMask:[.titled,.resizable],backing:.buffered,defer:false)
@@ -473,29 +527,16 @@ final class CompactSidebarTests: XCTestCase {
         defer { window.close() }
         try await Task.sleep(nanoseconds:300_000_000)
         XCTAssertTrue(model.tabs.isEmpty)
-        for _ in 0..<2 {
-            let count = model.tabs.count
-            model.requestNewTab()
-            try await Task.sleep(nanoseconds:250_000_000)
-            XCTAssertEqual(model.tabs.count, count + 1, "New tab must immediately create its start page")
-            XCTAssertTrue(window.childWindows?.isEmpty ?? true, "The start page stays inside the browser window")
-            let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "The start page must focus its search field")
-            XCTAssertTrue(editor.delegate is NSTextField)
-            let field = try XCTUnwrap(editor.delegate as? NSTextField)
-            XCTAssertTrue(field.isDescendant(of: host), "The focused field must belong to the start page")
-            XCTAssertEqual(field.placeholderString, L("Suchen oder URL eingeben"))
-            editor.insertText("example.invalid", replacementRange: NSRange(location:0,length:0))
-            XCTAssertTrue(editor.string.contains("example.invalid"))
-            model.focusAddress = true
-            try await Task.sleep(nanoseconds:100_000_000)
-            XCTAssertTrue(window.childWindows?.isEmpty ?? true)
-            XCTAssertTrue(window.firstResponder === editor)
-            XCTAssertFalse(model.focusAddress)
-            model.closeTab(model.activeID)
-        }
+        model.requestNewTab()
+        try await Task.sleep(nanoseconds:300_000_000)
+        XCTAssertTrue(window.childWindows?.isEmpty ?? true, "The start page stays inside the browser window")
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "A blank tab must focus its address field")
+        let field = try XCTUnwrap(editor.delegate as? NSTextField)
+        XCTAssertTrue(field.isDescendant(of: host))
+        XCTAssertEqual(field.placeholderString, L("Suchen oder Adresse eingeben", "Search or enter address"))
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in:host.bounds)); host.cacheDisplay(in:host.bounds,to:bitmap)
-        try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:URL(fileURLWithPath:"/tmp/YOBRO-compact-sidebar.png"))
+        try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:URL(fileURLWithPath:"/tmp/YOBRO-start-page.png"))
         XCTAssertEqual(model.tabs.count, 1)
         XCTAssertEqual(model.active?.url, "")
     }

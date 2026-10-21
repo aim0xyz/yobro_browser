@@ -15,7 +15,6 @@ targets:
     platform: iOS
     sources:
       - YoBroMobile
-      - ../Sources/YOBRO/SupabaseAuth.swift
       - ../Sources/YOBRO/PersistedState.swift
       - ../Sources/YOBRO/Theme.swift
       - path: ../Sources/YOBRO/Resources/YOBROMark.png

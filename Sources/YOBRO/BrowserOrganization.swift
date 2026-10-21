@@ -28,23 +28,35 @@ extension BrowserModel {
         guard let index = spaces.firstIndex(of: original), !value.isEmpty, value.count <= 40,
               !spaces.contains(where: { $0 != original && $0.localizedCaseInsensitiveCompare(value) == .orderedSame }) else { throw YOBROError.message(L("Dieser Space-Name ist leer oder bereits vergeben.")) }
         chat.rename(original, to: value)
-        try proxies.rename(from: original, to: value)
         spaces[index] = value
         for tab in tabs where tab.space == original { tab.space = value }
         for index in folders.indices where folders[index].space == original { folders[index].space = value }
         for index in closedTabs.indices where closedTabs[index].space == original { closedTabs[index].space = value }
         if let icon = spaceIcons.removeValue(forKey: original) { spaceIcons[value] = icon }
+        if let tone = spaceTones.removeValue(forKey: original) { spaceTones[value] = tone }
         if space == original { space = value }
         persistSession()
     }
     func setSpaceIcon(_ icon: SpaceIcon, for targetSpace: String) {
         guard spaces.contains(targetSpace) else { return }
-        if icon == .layers { spaceIcons.removeValue(forKey: targetSpace) }
-        else { spaceIcons[targetSpace] = icon.rawValue }
+        spaceIcons[targetSpace] = icon.rawValue
         persistSession()
     }
+    /// Like the tone, an unset icon is picked by position so the Space
+    /// switcher never shows two identical symbols.
     func spaceIcon(for targetSpace: String) -> SpaceIcon {
-        SpaceIcon(rawValue: spaceIcons[targetSpace] ?? "") ?? .layers
+        if let chosen = SpaceIcon(rawValue: spaceIcons[targetSpace] ?? "") { return chosen }
+        let automatic: [SpaceIcon] = [.home, .work, .ideas, .travel, .creative, .learning, .favorite, .nature, .music, .reading]
+        return automatic[(spaces.firstIndex(of: targetSpace) ?? 0) % automatic.count]
+    }
+    /// Spaces without a chosen colour take one by position, so neighbours differ.
+    func spaceTone(for targetSpace: String) -> SpaceTone {
+        SpaceTone(rawValue: spaceTones[targetSpace] ?? "") ?? .automatic(at: spaces.firstIndex(of: targetSpace) ?? 0)
+    }
+    func setSpaceTone(_ tone: SpaceTone, for targetSpace: String) {
+        guard spaces.contains(targetSpace) else { return }
+        spaceTones[targetSpace] = tone.rawValue
+        persistSession()
     }
     func addFolder(_ name: String, in targetSpace: String? = nil) throws {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -96,16 +108,23 @@ extension BrowserModel {
         splitPairs.removeAll { $0.contains(dragged) || $0.contains(target) }
         splitPairs.append(StoredSplit(first: target, second: dragged))
         second.folderID = first.folderID
-        if !first.isNote { first.resume() }
-        if !second.isNote { second.resume() }
+        first.resume()
+        second.resume()
         select(target); persistSession(); return true
     }
     /// Change command targeting while keeping the split's left/right order.
     func activateSplitPane(_ id: UUID) {
-        guard id != activeID, !showMail, !agentTabIDs.contains(id),
+        guard id != activeID, !agentTabIDs.contains(id),
               let activeID, let pair = splitPairs.first(where: { $0.contains(activeID) }),
               pair.contains(id) else { return }
         select(id)
+    }
+
+    /// Closes every tab below the sidebar divider: not pinned and in no
+    /// folder. Each one stays reopenable from the closed-tab list.
+    func clearTodayTabs() {
+        let ids = visibleTabs.filter { !$0.pinned && $0.folderID == nil }.map(\.id)
+        for id in ids { closeTab(id, revealStartPage: true) }
     }
 
     func separateSplit(_ id: UUID? = nil) {
@@ -116,152 +135,10 @@ extension BrowserModel {
     }
 }
 
-struct SpaceStrip: View {
-    @ObservedObject var model: BrowserModel
-    @State private var presented = false
-    @State private var presentTask: Task<Void, Never>?
-    @State private var dismissTask: Task<Void, Never>?
-    @State private var editing = false
-    @State private var original: String?
-    @State private var name = ""
-    @State private var addingFolder = false
-    @State private var folderName = ""
-    @State private var editingProxySpace: String?
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 4) {
-                Button { presented = true } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: model.spaceIcon(for: model.space).rawValue).font(.system(size: 13)).foregroundStyle(moss)
-                        Text(model.space).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text("\(model.visibleTabs.count)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 10).frame(maxWidth: .infinity).frame(height: 34)
-                    .background(YOBROTheme.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(YOBROButtonStyle(minimumSize: 34))
-                .yobroHelp(L("Space wechseln: ", "Switch space: ") + model.space)
-                .onHover(perform: hoverSpacePicker)
-                .popover(isPresented: $presented, arrowEdge: .leading) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L("SPACES")).font(.system(size: 9, weight: .semibold)).tracking(1.3).foregroundStyle(.secondary).padding(.horizontal, 8).padding(.bottom, 2)
-                        ForEach(model.spaces, id: \.self) { space in
-                            let count = model.tabs.filter { $0.space == space }.count
-                            let proxyActive = model.proxies.config(for: space)?.enabled == true
-                            Button {
-                                presented = false
-                                model.switchSpace(space)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 7).fill(space == model.space ? moss.opacity(0.18) : YOBROTheme.field)
-                                        Image(systemName: model.spaceIcon(for: space).rawValue).font(.system(size: 12, weight: .semibold)).foregroundStyle(moss)
-                                    }.frame(width: 30, height: 30)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 5) {
-                                            Text(space).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                            if proxyActive { Image(systemName: "shield.lefthalf.filled").font(.system(size: 8)).foregroundStyle(moss) }
-                                        }
-                                        Text("\(count) " + (count == 1 ? "Tab" : "Tabs")).font(.system(size: 9)).foregroundStyle(.secondary)
-                                    }
-                                    Spacer(minLength: 12)
-                                    if space == model.space { Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(moss) }
-                                }
-                                .padding(.horizontal, 8).frame(height: 42).contentShape(Rectangle())
-                                .background(space == model.space ? moss.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                            }.buttonStyle(OrganizationPopoverButtonStyle(hoverChanged: hoverSpacePicker))
-                        }
-                    }
-                    .padding(10).frame(width: 230).background(paper)
-                    .onHover(perform: hoverSpacePicker)
-                }
-                Menu {
-                    Button(L("Neuer Space …")) { original = nil; name = ""; editing = true }
-                    Button(L("Space umbenennen …")) { original = model.space; name = model.space; editing = true }
-                    SpaceIconMenu(model: model, space: model.space)
-                    Divider()
-                    Button(L("Proxy / VPN einrichten …")) { editingProxySpace = model.space }
-                    Divider()
-                    Button(L("Neuer Ordner …")) { folderName = ""; addingFolder = true }
-                } label: { Image(systemName: "plus").frame(width: 24, height: 34) }.menuStyle(.borderlessButton).fixedSize().yobroHelp(L("Spaces und Ordner verwalten"))
-            }.padding(3).background(ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
-        }
-        .popover(isPresented: editorPresented, arrowEdge: .leading) {
-            YOBRONameEditor(
-                icon: editing ? (original == nil ? "square.stack.3d.up.badge.plus" : model.spaceIcon(for: model.space).rawValue) : "folder.badge.plus",
-                title: editing ? (original == nil ? L("Neuer Space", "New space") : L("Space umbenennen", "Rename space")) : L("Neuer Ordner", "New folder"),
-                detail: editing ? L("Gib deinem Bereich einen klaren Namen.", "Give your space a clear name.") : L("Sammle zusammengehörige Tabs an einem Ort.", "Keep related tabs together."),
-                text: editorText,
-                cancel: closeEditor,
-                save: saveEditor
-            )
-        }
-        .sheet(isPresented: Binding(
-            get: { editingProxySpace != nil },
-            set: { if !$0 { editingProxySpace = nil } }
-        )) {
-            if let space = editingProxySpace {
-                SpaceProxySheet(model: model, space: space)
-            }
-        }
-        .onDisappear {
-            presentTask?.cancel()
-            dismissTask?.cancel()
-        }
-    }
-
-    private func hoverSpacePicker(_ inside: Bool) {
-        presentTask?.cancel()
-        dismissTask?.cancel()
-        guard !model.extensionActionPopupPresented else {
-            presented = false
-            return
-        }
-        if inside {
-            guard !presented else { return }
-            presentTask = Task {
-                try? await Task.sleep(nanoseconds: SidebarPreviewTiming.openDelay)
-                guard !Task.isCancelled, !model.extensionActionPopupPresented else { return }
-                presented = true
-            }
-            return
-        }
-        guard presented else { return }
-        dismissTask = Task {
-            try? await Task.sleep(nanoseconds: SidebarPreviewTiming.closeDelay)
-            guard !Task.isCancelled else { return }
-            presented = false
-        }
-    }
-
-    private var editorPresented: Binding<Bool> {
-        Binding(get: { editing || addingFolder }, set: { if !$0 { closeEditor() } })
-    }
-
-    private var editorText: Binding<String> {
-        editing ? $name : $folderName
-    }
-
-    private func closeEditor() {
-        editing = false; addingFolder = false
-    }
-
-    private func saveEditor() {
-        do {
-            if editing {
-                if let original { try model.renameSpace(original, to: name) }
-                else { try model.addSpace(name) }
-            } else { try model.addFolder(folderName) }
-            closeEditor()
-        } catch { model.notice = error.localizedDescription }
-    }
-}
-
 struct SpaceFolderRow: View {
     let folder: TabFolder
     @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
     @State private var rename = false
     @State private var name = ""
     @State private var targeted = false
@@ -284,28 +161,32 @@ struct SpaceFolderRow: View {
                 model.hoveredFolderID = nil
                 setCollapsed(!folder.collapsed)
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: folder.collapsed ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 8))
-                        .frame(width: 8, alignment: .center)
-                    Image(systemName: "folder.fill").foregroundStyle(folder.folderColor.color)
-                    Text(folder.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                HStack(spacing: 10) {
+                    Image(systemName: folder.collapsed ? "folder.fill" : "folder")
+                        .font(.system(size: 13))
+                        .foregroundStyle(folder.color == nil ? tone.muted : folder.folderColor.color)
+                        .frame(width: 16)
+                    Text(folder.name).font(.system(size: 13)).lineLimit(1)
                     Spacer()
                     if activeFolderTab != nil && hiddenTabCount > 0 {
                         Text("+\(hiddenTabCount)")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .font(.system(size: 10, weight: .semibold))
                             .monospacedDigit()
-                            .foregroundStyle(folder.folderColor.color)
                             .padding(.horizontal, 6)
                             .frame(height: 18)
-                            .background(folder.folderColor.color.opacity(0.14), in: Capsule())
+                            .background(Chrome.rest, in: Capsule())
                             .accessibilityLabel(L("\(hiddenTabCount) weitere Tabs", "\(hiddenTabCount) more tabs"))
-                    } else {
-                        Text("\(tabs.count)").font(.system(size: 9)).foregroundStyle(.secondary)
+                    } else if folder.collapsed {
+                        Text("\(tabs.count)").font(.system(size: 10)).opacity(0.6)
                     }
-                }.padding(.horizontal, 10).frame(height: 36).background(targeted ? moss.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .foregroundStyle(tone.muted)
+                .padding(.leading, 10).padding(.trailing, 10)
+                .frame(height: Chrome.rowHeight)
+                .chromeRow(selected: targeted, hovering: sourceHovered)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(YOBROButtonStyle(minimumSize: 36))
+            .buttonStyle(.plain)
                 .contentShape(Rectangle())
                 .onDrag {
                     model.beginSidebarFolderDrag(folder.id)
@@ -325,12 +206,6 @@ struct SpaceFolderRow: View {
                             Image(systemName: "folder.fill").foregroundStyle(folder.folderColor.color)
                             Text(folder.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                             Spacer()
-                            Button {
-                                model.hoveredFolderID = nil
-                                model.newNote(space: folder.space, folderID: folder.id)
-                            } label: { Image(systemName: "note.text.badge.plus") }
-                                .buttonStyle(.plain)
-                                .yobroHelp(L("Notiz in diesem Ordner erstellen", "Create note in this folder"))
                             Text("\(tabs.count)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                         }.padding(.horizontal, 8).padding(.bottom, 4)
                         if tabs.isEmpty {
@@ -344,10 +219,9 @@ struct SpaceFolderRow: View {
                                 } label: {
                                     HStack(spacing: 10) {
                                         Group {
-                                            if tab.isNote { Image(systemName: "note.text").foregroundStyle(moss) }
-                                            else if let favicon = tab.favicon { Image(nsImage: favicon).resizable().scaledToFit() }
+                                            if let favicon = tab.favicon { Image(nsImage: favicon).resizable().scaledToFit() }
                                             else { Image(systemName: "globe").foregroundStyle(moss) }
-                                        }.frame(width: 17, height: 17)
+                                        }.frame(width: 16, height: 16)
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(tab.sidebarTitle).font(.system(size: 12, weight: tab.id == model.activeID ? .medium : .regular)).lineLimit(1)
                                             if let host = URL(string: tab.url)?.host { Text(host).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
@@ -384,16 +258,13 @@ struct SpaceFolderRow: View {
                     folderID: folder.id, rowHeight: 36, model: model, tabTargeted: $targeted
                 ))
                 .contextMenu {
-                    Button(L("Neue Notiz", "New note")) {
-                        model.newNote(space: folder.space, folderID: folder.id)
-                    }
                     Button(L("Ordner umbenennen …")) { name = folder.name; rename = true }
                     FolderColorMenu(folder: folder, model: model)
                     Button(L("Ordner auflösen · Tabs behalten")) { model.dissolveFolder(folder.id) }
                 }
             VStack(spacing: 0) {
                 ForEach(displayedTabs) { tab in
-                    TabRow(tab: tab, model: model, reorderGap: 3).padding(.leading, 24)
+                    TabRow(tab: tab, model: model, reorderGap: 3).padding(.leading, 15)
                 }
             }
         }

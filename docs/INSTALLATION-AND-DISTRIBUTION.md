@@ -12,8 +12,8 @@ from a profile pauses it. History/download-list access remains a separate opt-in
 ## Local agents
 
 - The app contains a native `yobro-mcp` executable. End users need no Python or Node
-  installation for this adapter. Mail transport/import features still have their
-  separately documented Python dependency.
+  installation for this adapter. Browser-data import still has its separately
+  documented Python dependency.
 - Claude: save the bundled `YOBRO.mcpb` from Settings → Agents; install it in Claude
   Settings → Extensions. The user confirms that installation in Claude.
 - Codex: Settings → Agents invokes the installed Codex CLI with structured arguments
@@ -49,22 +49,6 @@ requires an authenticated HTTPS MCP service, user/device pairing, revocation, an
 deployment. OpenAI Secure MCP Tunnel is an option for private development; it does not
 replace the public endpoint required for public plugin distribution.
 
-## VPN privacy
-
-The previous built-in VPN location/IP has been removed. VPN keys were read from
-macOS Keychain, not hardcoded. The environment-driven bootstrap/FIFO path and its
-shared temporary status file have also been removed.
-
-New installs have zero VPN locations. Users can enter their own Outline credentials
-under Settings → Proxy / VPN. Location metadata is stored in the profile-local
-`managed-vpn-locations.json` (0600); the access key goes only into Keychain and is
-passed to the transport helper through stdin, not process arguments.
-
-An existing selected VPN with no corresponding local location configuration stays
-blocked until reconfigured or explicitly switched off. It never silently falls back
-to direct browsing. Existing Keychain items are not read, exported or deleted by the
-packaging workflow. A formerly built-in location must be configured again by its owner.
-
 The public Supabase project URL and publishable key remain client configuration, not
 secret credentials. User tokens remain separate. Backend authorization/RLS is outside
 the distribution scan; a public key must never be treated as authorization by itself.
@@ -78,8 +62,7 @@ the distribution scan; a public key must never be treated as authorization by it
 Produces `dist/YoBro-<version>-<architecture>-local.dmg`, its SHA-256 checksum,
 `dist/YoBro.app`, and `dist/privacy-audit.json`. Local builds are not notarized public
 releases. Current build architecture follows the build Mac; do not advertise an
-Apple Silicon build as Intel-compatible. The bundled VPN helper must also match the
-advertised architecture.
+Apple Silicon build as Intel-compatible.
 
 ```sh
 YOBRO_SIGN_IDENTITY='Developer ID Application: …' \

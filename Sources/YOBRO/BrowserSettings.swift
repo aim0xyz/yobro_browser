@@ -1,22 +1,19 @@
 import SwiftUI
 import WebKit
 import AppKit
-import CoreImage.CIFilterBuiltins
 
 struct BrowserSettings: View {
     @ObservedObject var model: BrowserModel
     @State var section = L("Allgemein", "General")
     private var sections: [(String, String)] { [
         (L("Allgemein", "General"), "gearshape"),
-        (L("Sync", "Sync"), "arrow.triangle.2.circlepath"),
         (L("Agenten", "Agents"), "cable.connector"),
         (L("Datenschutz & Werbung", "Privacy & ads"), "hand.raised"),
         (L("Downloads", "Downloads"), "arrow.down.circle"),
         (L("Erweiterungen"), "puzzlepiece.extension"),
         (L("Daten importieren"), "square.and.arrow.down"),
         (L("Lesezeichen"), "bookmark"),
-        (L("Passwörter"), "key"),
-        (L("Proxy / VPN"), "shield.lefthalf.filled")
+        (L("Passwörter"), "key")
     ] }
     var body: some View {
         HStack(spacing: 0) {
@@ -66,14 +63,12 @@ struct BrowserSettings: View {
                 Group {
                     switch section {
                     case L("Allgemein", "General"): GeneralSettings(model: model)
-                    case L("Sync", "Sync"): SyncSettings(model: model)
                     case L("Agenten", "Agents"): AgentConnectionsView(model: model)
                     case L("Datenschutz & Werbung", "Privacy & ads"): AdBlockSettings(model: model)
                     case L("Downloads", "Downloads"): DownloadSettings(model: model)
                     case L("Erweiterungen"): ScrollView { ExtensionSettings(store: model.extensions, model: model) }
                     case L("Daten importieren"): BrowserImportView(model: model)
                     case L("Lesezeichen"): BookmarkSettings(model: model)
-                    case L("Proxy / VPN"): SpaceProxySettingsView(model: model)
                     default: PasswordSettings(model: model)
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -160,23 +155,6 @@ struct GeneralSettings: View {
                             .font(.system(size: 10)).foregroundStyle(.red)
                     }
                 }.yobroCard(padding: 16, emphasized: true)
-
-                YOBROSettingsHeading(
-                    icon: "sidebar.left",
-                    title: L("Seitenleiste", "Sidebar"),
-                    detail: L("Lege fest, wie sich die linke Seitenleiste verhält, wenn du sie einklappst.", "Choose how the left sidebar behaves when you collapse it.")
-                )
-                Toggle(isOn: $model.sidebarAutoHide) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(L("Am Browserrand automatisch einblenden", "Reveal automatically at the browser edge"))
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(L("Die Seitenleiste verschwindet vollständig und öffnet sich am linken Rand als Overlay, ohne die Webseite zu verschieben.", "The sidebar disappears completely and opens from the left edge as an overlay without moving the webpage."))
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(moss)
-                .yobroCard(padding: 16)
 
                 YOBROSettingsHeading(
                     icon: "bolt.badge.clock",
@@ -278,134 +256,6 @@ struct DownloadSettings: View {
     }
 }
 
-struct SyncSettings: View {
-    @ObservedObject var model: BrowserModel
-    @ObservedObject private var sync: BrowserSyncStore
-    @State private var email = ""
-    @State private var otp = ""
-    @State private var recovery = ""
-    @State private var pairingCode: DevicePairingCode?
-    @State private var pairingError: String?
-
-    init(model: BrowserModel) {
-        self.model = model
-        sync = model.sync
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                YOBROSettingsHeading(icon: "arrow.triangle.2.circlepath", title: L("Dein Browser auf allen Geräten", "Your browser on every device"), detail: L("Tabs, Spaces, Ordner, Lesezeichen und bereinigter Verlauf werden vor dem Upload auf deinem Gerät verschlüsselt.", "Tabs, spaces, folders, bookmarks, and sanitized history are encrypted on your device before upload."))
-                if sync.signedIn {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(sync.email, systemImage: "person.crop.circle.badge.checkmark").font(.system(size: 13, weight: .semibold))
-                        Text(sync.status).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
-                        HStack {
-                            Button(L("Jetzt synchronisieren", "Sync now")) { Task { await sync.syncNow(model) } }
-                                .buttonStyle(.borderedProminent).tint(moss).disabled(sync.busy)
-                            Button(L("iPhone per QR verbinden", "Connect iPhone by QR")) {
-                                Task {
-                                    do { pairingCode = try await sync.createDevicePairingCode() }
-                                    catch { pairingError = error.localizedDescription }
-                                }
-                            }
-                            if sync.busy { ProgressView().controlSize(.small) }
-                            Spacer()
-                            Button(L("Abmelden", "Sign out")) { Task { await sync.signOut() } }
-                        }
-                    }.yobroCard(padding: 15, emphasized: true)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label(L("Wiederherstellungscode", "Recovery code"), systemImage: "key.horizontal.fill").font(.system(size: 12, weight: .semibold))
-                        Text(L("Diesen Code brauchst du einmalig auf einem weiteren Mac, iPhone oder später unter Windows. Supabase kann deine Browserdaten ohne ihn nicht lesen.", "You need this code once on another Mac, iPhone, or later on Windows. Supabase cannot read your browser data without it."))
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                        if let code = sync.recoveryCode {
-                            HStack {
-                                Text(code).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).lineLimit(1)
-                                Spacer()
-                                Button(L("Kopieren", "Copy")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(code, forType: .string) }
-                            }.padding(10).background(YOBROTheme.field, in: RoundedRectangle(cornerRadius: 8))
-                        } else {
-                            Button(L("Code anzeigen", "Show code")) { sync.revealRecoveryCode() }
-                        }
-                    }.yobroCard(padding: 15)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(L("Verbundene Geräte", "Connected devices"), systemImage: "iphone.and.arrow.forward")
-                            .font(.system(size: 12, weight: .semibold))
-                        if sync.devices.isEmpty { Text(L("Noch kein zusätzliches Gerät verbunden.", "No additional device connected yet.")).font(.system(size: 11)).foregroundStyle(.secondary) }
-                        ForEach(sync.devices) { device in
-                            HStack { Image(systemName: device.platform == "ios" ? "iphone" : "laptopcomputer"); Text(device.label); Spacer(); Text(device.last_used_at.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 10)).foregroundStyle(.secondary) }
-                        }
-                    }.yobroCard(padding: 15)
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if sync.otpRequested {
-                            TextField(L("Code aus der E-Mail", "Code from your email"), text: $otp).textContentType(.oneTimeCode)
-                            Text(L("Gesendet an \(sync.otpEmail)", "Sent to \(sync.otpEmail)")).font(.system(size: 11)).foregroundStyle(.secondary)
-                        } else {
-                            TextField(L("E-Mail", "Email"), text: $email).textContentType(.emailAddress)
-                        }
-                        SecureField(L("Wiederherstellungscode · nur auf weiteren Geräten", "Recovery code · only on additional devices"), text: $recovery)
-                        HStack {
-                            Button(sync.otpRequested ? L("Code bestätigen", "Verify code") : L("Code senden", "Send code")) {
-                                Task {
-                                    if sync.otpRequested { await sync.verifyOTP(otp, recoveryCode: recovery, model: model); otp = ""; recovery = "" }
-                                    else { await sync.requestOTP(email: email) }
-                                }
-                            }
-                                .buttonStyle(.borderedProminent).tint(moss)
-                            if sync.otpRequested { Button(L("Andere E-Mail", "Different email")) { sync.cancelOTP(); otp = "" } }
-                            if sync.busy { ProgressView().controlSize(.small) }
-                        }.disabled(sync.busy || (sync.otpRequested ? otp.isEmpty : email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-                        Text(sync.status).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
-                    }.yobroCard(padding: 15, emphasized: true)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(L("Bleibt auf dem Gerät", "Stays on device"), systemImage: "macbook.and.iphone")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(L("Cookies und Website-Logins, gespeicherte Passwörter, Mailkonten, Downloads, Erweiterungen sowie Proxy-Einstellungen werden nicht hochgeladen.", "Cookies and website sessions, saved passwords, mail accounts, downloads, extensions, and proxy settings are not uploaded."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }.yobroCard(padding: 15)
-            }
-        }
-        .sheet(item: $pairingCode) { code in DevicePairingQRView(code: code) }
-        .alert(L("Kopplung nicht möglich", "Could not pair"), isPresented: Binding(get: { pairingError != nil }, set: { if !$0 { pairingError = nil } })) { Button("OK") {} } message: { Text(pairingError ?? "") }
-        .onAppear { if email.isEmpty { email = sync.email }; Task { await sync.loadDevices() } }
-        .onDisappear { otp = ""; recovery = "" }
-    }
-}
-
-private struct DevicePairingQRView: View {
-    let code: DevicePairingCode
-    @Environment(\.dismiss) private var dismiss
-    private var payload: String { (try? code.encoded()) ?? "" }
-    private var image: NSImage? {
-        let filter = CIFilter.qrCodeGenerator(); filter.message = Data(payload.utf8); filter.correctionLevel = "Q"
-        guard let output = filter.outputImage?.transformed(by: .init(scaleX: 8, y: 8)) else { return nil }
-        return NSImage(cgImage: CIContext().createCGImage(output, from: output.extent)!, size: output.extent.size)
-    }
-    var body: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 9) { YOBROMark(size: 26); Text("YoBro").font(.system(size: 16, weight: .bold)) }
-            Text(L("iPhone verbinden", "Connect iPhone")).font(.title2.bold())
-            Text(L("Öffne YoBro auf dem iPhone und scanne diesen Code. Er ist nur zehn Minuten gültig und kann einmal verwendet werden.", "Open YoBro on your iPhone and scan this code. It expires in ten minutes and works once.")).multilineTextAlignment(.center).foregroundStyle(.secondary)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.none)
-                    .scaledToFit()
-                    .frame(width: 270, height: 270)
-                    .padding(16)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 24))
-                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(moss.opacity(0.45), lineWidth: 2))
-            }
-            Button(L("Code kopieren · Simulator", "Copy code · Simulator")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(payload, forType: .string) }
-            Button(L("Fertig", "Done")) { dismiss() }.buttonStyle(.borderedProminent)
-        }.padding(28).frame(width: 430).background(YOBROTheme.page)
-    }
-}
-
 struct AdBlockSettings: View {
     @ObservedObject var model: BrowserModel
     var body: some View {
@@ -434,10 +284,10 @@ struct BridgeAccessSettings: View {
             Divider().opacity(0.45)
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(L("Verlauf und Downloads freigeben", "Allow history and downloads"))
+                    Text(L("Verlauf, Downloads und offene Tabs freigeben", "Allow history, downloads and open tabs"))
                         .font(.system(size: 13, weight: .semibold))
                     Text(model.bridgeLibraryAccess
-                         ? L("Agenten können deinen Verlauf und deine Downloadpfade auslesen.", "Agents can read your history and download paths.")
+                         ? L("Agenten können deinen Verlauf, deine Downloadpfade und die Titel und Adressen deiner Tabs auslesen. Private Tabs bleiben immer verborgen.", "Agents can read your history, download paths and the titles and addresses of your tabs. Private tabs always stay hidden.")
                          : L("Gesperrt. Alle anderen Befehle brauchen einen sichtbaren Agenten-Tab.", "Blocked. Every other command needs a visible agent tab."))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -448,8 +298,8 @@ struct BridgeAccessSettings: View {
                 ))
                 .labelsHidden().toggleStyle(.switch)
             }
-            Text(L("Den Zugriff insgesamt beendest du im Agentenbereich der Seitenleiste.",
-                   "To stop access entirely, pause the agent in the sidebar."))
+            Text(L("Den Zugriff insgesamt beendest du unter Einstellungen → Agenten.",
+                   "To stop access entirely, turn it off in Settings → Agents."))
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .yobroCard(padding: 15)
@@ -754,7 +604,7 @@ struct BookmarkSettings: View {
         let updated = model.bookmarks.filter { $0.id != entry.id }
         do {
             try JSONEncoder().encode(updated).write(to: model.home.appendingPathComponent("bookmarks.json"), options: .atomic)
-            model.bookmarks = updated; model.markSyncChanged()
+            model.bookmarks = updated
         }
         catch { self.error = error.localizedDescription }
     }

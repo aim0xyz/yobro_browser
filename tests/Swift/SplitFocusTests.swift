@@ -43,7 +43,6 @@ final class SplitFocusTests: XCTestCase {
         }
         let port = try XCTUnwrap(Int(String(decoding: line, as: UTF8.self)))
         let model = BrowserModel(root: home)
-        await model.webStartupTask?.value
         model.showSidebar = true
         let left = model.newTab(url: "http://127.0.0.1:\(port)/left")
         let right = model.newTab(url: "http://127.0.0.1:\(port)/right")

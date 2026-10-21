@@ -29,7 +29,7 @@ final class WindowControlsTests: XCTestCase {
                 let rect = button.convert(button.bounds, to: host)
                 let topCenter = host.isFlipped ? rect.midY : host.bounds.height - rect.midY
                 XCTAssertEqual(topCenter, 26, accuracy: 1)
-                XCTAssertEqual(rect.minX, (sidebar ? 17 : 10) + Double(index) * 22, accuracy: 1)
+                XCTAssertEqual(rect.minX, 18 + Double(index) * 22, accuracy: 1)
             }
         }
     }

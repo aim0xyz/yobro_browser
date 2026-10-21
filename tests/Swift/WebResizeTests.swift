@@ -10,9 +10,7 @@ final class WebResizeTests: XCTestCase {
         let previous = getenv("YOBRO_HOME").map { String(cString: $0) }; setenv("YOBRO_HOME", home.path, 1)
         defer { if let previous { setenv("YOBRO_HOME", previous, 1) } else { unsetenv("YOBRO_HOME") }; try? FileManager.default.removeItem(at: home) }
         let model = BrowserModel(); model.showAgent = false
-        let previousAutoHide = model.sidebarAutoHide
-        model.sidebarAutoHide = false
-        defer { model.sidebarAutoHide = previousAutoHide }
+        defer { UserDefaults.standard.removeObject(forKey: "YOBRO.showSidebar") }
         let first = model.newTab()
         // TabContent renders NewTabPage for a tab without a URL, so the WebView
         // would never enter the view hierarchy and every measured frame would be
@@ -31,10 +29,12 @@ final class WebResizeTests: XCTestCase {
             model.showSidebar = sidebar; window.setContentSize(NSSize(width:width,height:700)); host.layoutSubtreeIfNeeded()
             try await Task.sleep(nanoseconds:350_000_000)
             let rect = first.webView.convert(first.webView.bounds, to:host)
-            XCTAssertEqual(rect.minY, 10, accuracy: 2)
-            XCTAssertEqual(rect.maxY, host.bounds.height - 10, accuracy: 2)
+            XCTAssertEqual(rect.minY, Chrome.inset, accuracy: 2)
+            XCTAssertEqual(rect.maxY, host.bounds.height - Chrome.inset, accuracy: 2)
             XCTAssertLessThanOrEqual(rect.maxX, host.bounds.width + 2)
-            XCTAssertEqual(first.webView.bounds.width, width - (sidebar ? 248 : 80) - 20, accuracy:2)
+            // The page card sits next to the sidebar, or fills the window
+            // between the two edge insets when the sidebar is hidden.
+            XCTAssertEqual(first.webView.bounds.width, width - (sidebar ? Chrome.sidebarWidth : Chrome.inset) - Chrome.inset, accuracy:2)
             if width == 1360 { wide = first.webView.bounds.width } else { XCTAssertLessThan(first.webView.bounds.width, wide) }
         }
         let second = model.newTab()

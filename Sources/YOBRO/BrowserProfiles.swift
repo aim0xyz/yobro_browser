@@ -91,7 +91,6 @@ final class BrowserProfiles: ObservableObject {
         try save(updated)
         browser.persistSession()
         browser.isProfileActive = false
-        browser.mail.stopPolling()
         for tab in browser.tabs { tab.webView.pauseAllMediaPlayback(completionHandler: nil) }
         let next = models[id] ?? BrowserModel(profile: profile, root: root)
         models[id] = next
@@ -104,85 +103,6 @@ final class BrowserProfiles: ObservableObject {
         browserChanges = browser.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
     func persistAll() { for model in models.values { model.persistSession() } }
-}
-
-struct ProfileMenu: View {
-    @ObservedObject var profiles: BrowserProfiles
-    @ObservedObject var model: BrowserModel
-    var compact = false
-    @State private var hovering = false
-    var body: some View {
-        Menu {
-            Text(L("Lokales Profil", "Local profile") + " · " + profiles.active.name)
-            ForEach(profiles.registry.profiles) { profile in
-                Button {
-                    do { try profiles.switchTo(profile.id) } catch { model.notice = error.localizedDescription }
-                } label: {
-                    Label(profile.name, systemImage: profile.id == profiles.active.id ? "checkmark" : profile.symbol)
-                }
-            }
-            Divider()
-            Button(L("Neues Profil …", "New profile …")) { model.creatingProfile = true; model.showProfileEditor = true }
-            Button(L("Profil bearbeiten …", "Edit profile …")) { model.creatingProfile = false; model.showProfileEditor = true }
-            Divider()
-            Button(L("Einstellungen …", "Settings …")) { model.settingsSection = L("Erweiterungen"); model.showSettings = true }
-            Button(L("Browserdaten importieren …", "Import browser data …")) { model.settingsSection = L("Daten importieren"); model.showSettings = true }
-        } label: {
-            profileLabel.contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel(L("Profil & Einstellungen", "Profile & settings") + ": " + profiles.active.name)
-        .frame(width: compact ? 42 : 214, height: compact ? 40 : 50)
-        .overlay {
-            if compact {
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(ink.opacity(hovering ? 0.065 : 0))
-                    .allowsHitTesting(false)
-            }
-        }
-        .onHover { hovering = $0 }
-        .yobroHelp(L("Profil: ", "Profile: ") + profiles.active.name + "\n" + L("Profil wechseln und Einstellungen öffnen", "Switch profiles and open settings"))
-    }
-
-    @ViewBuilder
-    private var profileLabel: some View {
-        if compact {
-            ZStack(alignment: .bottomTrailing) {
-                Image(systemName: profiles.active.symbol)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(moss)
-                    .frame(width: 42, height: 40)
-                    .background(YOBROTheme.surface.opacity(0.58), in: RoundedRectangle(cornerRadius: 10))
-                Circle()
-                    .fill(moss)
-                    .frame(width: 7, height: 7)
-                    .overlay(Circle().stroke(YOBROTheme.chromeBottom, lineWidth: 2))
-                    .padding(5)
-            }
-        } else {
-            HStack(spacing: 10) {
-                Image(systemName: profiles.active.symbol)
-                    .font(.system(size: 17, weight: .medium))
-                    .frame(width: 34, height: 34)
-                    .background(moss.opacity(0.14), in: Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profiles.active.name).font(.system(size: 12, weight: .semibold))
-                    Text(L("Profil & Einstellungen", "Profile & settings"))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .frame(width: 214, height: 50)
-            .background(YOBROTheme.surface.opacity(0.38), in: RoundedRectangle(cornerRadius: 12))
-        }
-    }
 }
 
 struct ProfileEditor: View {

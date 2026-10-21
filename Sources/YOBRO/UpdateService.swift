@@ -61,24 +61,23 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
 
 struct UpdateSidebarCard: View {
     @ObservedObject var updates: UpdateService
+    @Environment(\.spaceTone) private var tone
 
     var body: some View {
         if let version = updates.availableVersion {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(moss)
-                    Text(L("Update verfügbar", "Update available")).font(.system(size: 11, weight: .semibold))
+            Button { updates.installAvailableUpdate() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill")
+                    Text(L("YoBro \(version) installieren", "Install YoBro \(version)")).font(.system(size: 12.5, weight: .medium))
                     Spacer()
                 }
-                Text(L("YoBro \(version) kann installiert werden.", "YoBro \(version) is ready to install."))
-                    .font(.system(size: 10)).foregroundStyle(ink.opacity(0.62))
-                Button(L("Update installieren", "Install update")) { updates.installAvailableUpdate() }
-                    .buttonStyle(.borderedProminent).tint(moss).controlSize(.small)
+                .foregroundStyle(tone.muted)
+                .padding(.horizontal, 10).frame(height: Chrome.rowHeight)
+                .background(Chrome.rest, in: RoundedRectangle(cornerRadius: Chrome.radius))
+                .contentShape(Rectangle())
             }
-            .padding(12)
-            .background(moss.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(moss.opacity(0.20)))
-            .padding(.bottom, 8)
+            .buttonStyle(.plain)
+            .padding(.top, 6)
             .accessibilityElement(children: .contain)
         }
     }

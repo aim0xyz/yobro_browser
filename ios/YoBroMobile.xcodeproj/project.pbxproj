@@ -91,6 +91,7 @@
 				D7824F2FE6B58E987BDC5E74 /* MobileState.swift */,
 				6245FAA24AEBD256707D1F5C /* MobileSync.swift */,
 				52DDAADC7EA87DD7F30856F0 /* MobileTheme.swift */,
+				ECCB1E23A33A130E942813E9 /* SupabaseAuth.swift */,
 				8C96B622761502F14B6E2D6D /* YoBroMobile.entitlements */,
 				F7201695AECB61F64ACD3F3F /* YoBroMobileApp.swift */,
 			);
@@ -114,7 +115,6 @@
 			isa = PBXGroup;
 			children = (
 				9578CC390FBF8C36F58D9A4B /* PersistedState.swift */,
-				ECCB1E23A33A130E942813E9 /* SupabaseAuth.swift */,
 				85A5DC27EB5089769FB8D5EE /* Theme.swift */,
 			);
 			name = YOBRO;

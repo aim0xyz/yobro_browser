@@ -344,7 +344,6 @@ extension BrowserModel {
         // Persist each selected category before publishing it. Existing entries are never cleared.
         if !incoming.isEmpty { try JSONEncoder().encode(bookmarks).write(to: home.appendingPathComponent("bookmarks.json"), options: .atomic); self.bookmarks = bookmarks }
         if !visits.isEmpty { try JSONEncoder().encode(history).write(to: home.appendingPathComponent("history.json"), options: .atomic); self.history = history }
-        if !incoming.isEmpty || !visits.isEmpty { markSyncChanged() }
         return (addedBookmarks, addedHistory)
     }
 }
@@ -355,9 +354,9 @@ enum PasswordVault {
         guard let url = URL(string: entry.url), let host = url.host, ["http", "https"].contains(url.scheme ?? "") else { return false }
         let account = "\(url.scheme!)://\(host):\(url.port ?? (url.scheme == "https" ? 443 : 80))|\(entry.username)"
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service(home: home), kSecAttrAccount as String: account]
-        // Every other secret in YOBRO (mail, proxy, VPN, sync) is stored
-        // ThisDeviceOnly. Without this the login items were the only ones that
-        // could travel into a backup or to another Mac.
+        // Every other secret in YOBRO is stored ThisDeviceOnly. Without this
+        // the login items were the only ones that could travel into a backup
+        // or to another Mac.
         let value: [String: Any] = [
             kSecValueData as String: try JSONEncoder().encode(entry),
             kSecAttrLabel as String: "YoBro · \(host) · \(entry.username)",

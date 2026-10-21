@@ -68,7 +68,7 @@ final class AgentActivityTests: XCTestCase {
         let model = BrowserModel(root: home)
         model.agentEnabled = true
         model.chat.running = true
-        model.voice.stopCurrentAction(browser: model)
+        model.stopAgentRun()
         XCTAssertFalse(model.chat.running)
         XCTAssertTrue(model.agentEnabled)
     }

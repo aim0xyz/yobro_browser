@@ -60,24 +60,20 @@ final class TabHibernationTests: XCTestCase {
     }
 
     @MainActor
-    func testNotesAndAgentTabsAreNeverSuspended() async throws {
+    func testAgentTabsAreNeverSuspended() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
         let model = BrowserModel(root: home)
 
-        let note = model.newNote()
         let agentTab = model.newAgentTab(url: "https://agent.example")
         let mainTab = model.newTab(url: "https://main.example")
         model.select(mainTab.id)
 
-        note.lastActiveAt = Date().addingTimeInterval(-7200)
         agentTab.lastActiveAt = Date().addingTimeInterval(-7200)
 
         let suspended = await model.suspendInactiveTabs(olderThan: 1800)
 
-        XCTAssertFalse(suspended.contains(note.id))
         XCTAssertFalse(suspended.contains(agentTab.id))
-        XCTAssertFalse(note.isSuspended)
         XCTAssertFalse(agentTab.isSuspended)
     }
 

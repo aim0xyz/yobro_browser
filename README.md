@@ -2,7 +2,7 @@
 
 **Your browser. Your bro.**
 
-A native macOS browser prototype with an Arc-inspired sidebar and dedicated agent tabs sharing the selected profile's WebKit sessions. SwiftUI + AppKit + Apple's WebKit, with a bundled native MCP adapter for local agents.
+A native macOS browser prototype in the style of Arc and YAB: a sidebar tinted in each Space's colour, pages as cards beside it, and dedicated agent tabs sharing the selected profile's WebKit sessions. SwiftUI + AppKit + Apple's WebKit, with a bundled native MCP adapter for local agents.
 
 ## Run
 
@@ -29,14 +29,13 @@ adapter needs no separate Python installation. ChatGPT remote is not provisioned
 Public releases require Developer ID signing and Apple notarization; `--release`
 refuses to run without that configuration. Packaging uses an explicit allowlist,
 scans nested archives for recognized secrets/private state, and emits a privacy
-audit and checksum. VPN locations and access keys are never bundled; users can
-configure their own Outline access in settings.
+audit and checksum.
 
 See [installation, privacy boundaries and release prerequisites](docs/INSTALLATION-AND-DISTRIBUTION.md).
 
 ## Browser
 
-YoBro uses German when the primary macOS language is German (including Austria and Switzerland), and English for all other languages. The language is selected at launch and covers menus, settings, onboarding, mail and import messages. Existing user-created names and imported content are preserved.
+YoBro uses German when the primary macOS language is German (including Austria and Switzerland), and English for all other languages. The language is selected at launch and covers menus, settings, onboarding and import messages. Existing user-created names and imported content are preserved.
 
 The first-run onboarding offers an optional browser-data import with preview and selection. Its completion is saved locally; reopen it via **Browser → Einrichtung erneut öffnen**.
 
@@ -44,43 +43,35 @@ Passkey signing preparation and remaining NordVPN limitations: [implementation s
 
 **Erweiterungen & Import:** Install compatible Chrome Web Store packages or local WebExtensions (macOS 15.4+), import selected bookmarks, history, tabs, password CSVs and cookies from supported browser profiles or exports, and manage imported bookmarks and Keychain passwords via **⌘,**. See [formats and limitations](docs/EXTENSIONS-IMPORT.md).
 
-**YoBro Mail:** the sidebar envelope now opens an internal multi-account IMAP/SMTP client with provider discovery, unified inbox, all IMAP folders, HTML reading, attachment downloads, read-status updates, optional notifications and composing. Gmail/app passwords, iCloud Mail, Spacemail and generic server configuration are supported paths; OAuth-only accounts are not yet connectable. See [Mail setup and current limitations](docs/MAIL.md). The mail transport currently requires local Python 3.9+.
+**Look:** each Space has its own colour (pick it from the Space menu); the window and sidebar take that tone, text and icons use a dark shade of the same hue, and pages float as white cards with an 8 pt gap. The sidebar holds back/forward/reload, the current address, pinned tabs as a favicon grid, the Space's folders, a divider whose **Clear** closes today's tabs, and the Space switcher at the bottom. ⌘S hides the sidebar for a full-page view; it slides back in at the left edge.
 
-**Bro dashboard and voice:** the start page shows a prompt, quick actions, the eight newest inbox messages with sender and date, working folders and local timers. Connect an agent model and enable agent access. In the right panel's Agent settings pop-up, choose the “Yo Bro” wake word or hold the right Option key to speak; release the key to send. Voice mode is off until you turn it on; after that it resumes on launch and remains active while the panel is closed. After a wake word, follow-up requests work without it for one minute. macOS may request Input Monitoring for the right Option key outside YoBro. YoBro uses macOS speech recognition. While waiting for the wake word, audio stays on the Mac where on-device recognition is supported; after the wake word, during Option recordings, and on Macs without on-device recognition, Apple may process the raw microphone audio. Before sending chat, tool results, mail, page, or note text to the model, YoBro replaces detected email addresses, credentials, phone numbers, postal addresses, and known saved secrets with local placeholders; model replies and tool arguments are restored locally. For speech, detected private text is spoken by macOS locally, while other segments are sent to Fish Audio and streamed into playback as PCM arrives when a Fish key is configured. Without a Fish key, macOS speaks locally. Detection is heuristic and cannot guarantee that every private detail is found; undetected text may reach the model or Fish Audio. The Fish key is stored in the macOS Keychain. Stop voice mode in Agent settings; pausing agent access or changing profile also stops it. Timers alert locally with a sound and a chat entry while YoBro is running.
+**Address field:** ⌘T, ⌘L and ⌘K open one centred field. Typing searches DuckDuckGo or opens an address; suggestions include open tabs, history and bookmarks, and an empty field lists recent tabs plus the last closed one. ⌘T opens the destination in a new tab without creating an empty tab first.
 
-The built-in agent can navigate and inspect its browser tabs, fill web forms, click controls, press keys, and verify the resulting page. In YoBro Mail it can read messages, write a visible editable draft, and request sending the draft. Sending through SMTP requires approval in the agent panel showing sender, recipient, subject and message body. A declined request leaves the draft available for editing.
-
-**Working folders:** add a folder on the start page under **Arbeitsmaterial**. Bro can list and read UTF-8 documentation and source files inside that folder, including `AGENTS.md`, `SKILL.md` and CLI instructions. It cannot read known secret files, dependencies or files outside the selected folder. Read file contents become context for the configured agent model. Folder access can be removed from the same card. The specifically registered `~/Documents/appstore-hq` folder also exposes its existing `asc` CLI: Bro may run `status`, `apps`, `app`, `metadata`, `locales` and `screenshots` reads, and may request `new-version` with an explicit app, version and platform. YoBro shows the exact version command for approval before it runs. No other project scripts or shell commands are available through this integration. Creating an App Store Connect version does not build, upload, submit or release an app.
-
-Conversation history is stored per browser profile in `space-chat.json`, and each request sends up to 30 recent user, assistant and context entries from the current Space to the configured model. Starting a new chat removes that Space's history. The 60-second voice activation is temporary and is not the same as conversation memory.
+**Assistant:** ⇧⌘A opens the assistant beside the page. It uses your own OpenRouter account (sign in with one click) or any OpenAI-compatible endpoint, including a local server. It reads the tabs of the current Space and works in its own agent tabs beside yours; it cannot click, type or scroll in your tabs and never sees private tabs. Before anything that sends, publishes, books or pays it is told to ask you in the chat. Conversation history is stored per profile in `space-chat.json`; each request sends up to 30 recent messages of the current Space.
 
 YoBro follows the macOS light/dark appearance automatically, including changes while running. The native sidebar, start page, library, search and agent panels use adaptive colors. Websites retain their own styling; websites implementing `prefers-color-scheme` can respond to the system appearance. No forced page inversion is applied.
 
-Cross-device history sync is deferred. The intended future scope includes Android, iOS, macOS, Windows and Linux, so an iCloud-only solution is not planned. No backend has been created and no history is uploaded.
+There is no cross-device sync: tabs, history and bookmarks stay on the Mac.
 
-- Native WebKit tabs with persistent cookies and login sessions. New tabs immediately focus the search field on the start page, without a popover. ⌘L also focuses this field on blank tabs; on websites it opens the address editor.
-- Collapsed sidebar keeps mail, spaces and tabs as icons; history and downloads stay at the bottom.
-- Sidebar, pinned tabs (right-click a tab), custom spaces with selectable icons, colored tab folders and resizable split view.
-- Compact controls without a permanent URL field; ⌘L opens address/search (DuckDuckGo).
-- New-tab page, launch shortcuts, persistent tab URLs and selection.
-- Built-in per-Space agent chat with a persisted timeline, email context, saved notes, visible tab reads and approved URL opening. Configurable Chat Completions endpoint; local agent access retains its pause switch.
-- Searchable local history, and a quick switcher for tabs, history and web search.
+- Native WebKit tabs with persistent cookies and login sessions.
+- Sidebar, pinned tabs (right-click a tab), custom spaces with icons and colours, coloured tab folders and resizable split view.
+- Searchable local history and bookmarks.
 - WebKit download manager with progress, cancellation, Finder reveal and collision-safe filenames.
 - Drag a tab onto another tab to pair them in split view; separate them without closing either page. Drop near a row edge to reorder. Website favicons appear beside tab titles.
 - Duplicate tabs and reopen the last 20 closed tabs, including after a restart.
 - Native in-page search with next/previous match and wraparound.
-- ⌘S toggle sidebar, ⌘T new tab, ⌘L address, ⌘W close tab, ⌘R reload, ⇧⌘S split, ⇧⌘A agent panel.
-- ⌘K quick switcher, ⌘F page search, ⌘G / ⇧⌘G next/previous match, ⌘Y history, ⇧⌘J downloads, ⇧⌘T reopen closed tab.
+- ⌘S toggle sidebar, ⌘T new tab, ⌘L address, ⌘W close tab, ⌘R reload, ⇧⌘S split, ⇧⌘A assistant.
+- ⌘K address field, ⌘F page search, ⌘G / ⇧⌘G next/previous match, ⌘Y history, ⇧⌘J downloads, ⇧⌘T reopen closed tab.
 
 Spaces organize tabs within a profile and share that profile’s cookie store. Local browser profiles have separate cookies and website data. Sessions restore URLs, not back/forward history or in-page form state.
 
 ## Local browser profiles
 
-The avatar at the bottom left opens profile switching, **New profile**, **Edit profile**, Settings and browser-data import. Profiles have a name and selectable icon; no registration or cloud account is required. The compact sidebar has the same menu.
+The library button at the bottom left opens history, bookmarks, downloads, profile switching (**New profile**, **Edit profile**), browser-data import and Settings. Profiles have a name and selectable icon; no registration or cloud account is required.
 
-The existing browser becomes **Personal** without moving its files or resetting its WebKit store. New profiles start empty and get separate persistent WebKit stores, tabs/spaces, history, bookmarks, imported Keychain passwords, extensions, mail-account lists and download histories. The selected profile is restored on launch. Profile names and icons can be changed without changing storage identifiers.
+The existing browser becomes **Personal** without moving its files or resetting its WebKit store. New profiles start empty and get separate persistent WebKit stores, tabs/spaces, history, bookmarks, imported Keychain passwords, extensions and download histories. The selected profile is restored on launch. Profile names and icons can be changed without changing storage identifiers.
 
-Registry: `profiles.json` in the existing `YOBRO` data directory. Additional profile files: `Profiles/<UUID>/`. Additional profiles also keep downloaded files in their own `Downloads/` subdirectory. New profiles start with agent access paused. Inactive profiles reject agent requests and stop mail polling; media playback is paused on switching. Existing downloads and website/extension background activity may continue within their original profile. Profiles are separate browser contexts, not macOS user accounts or locked vaults. Language and the app’s chrome appearance remain app-wide. Profile deletion and custom photo uploads are not included yet.
+Registry: `profiles.json` in the existing `YOBRO` data directory. Additional profile files: `Profiles/<UUID>/`. Additional profiles also keep downloaded files in their own `Downloads/` subdirectory. New profiles start with agent access paused. Inactive profiles reject agent requests; media playback is paused on switching. Existing downloads and website/extension background activity may continue within their original profile. Profiles are separate browser contexts, not macOS user accounts or locked vaults. Language and the app’s chrome appearance remain app-wide. Profile deletion and custom photo uploads are not included yet.
 
 ## Agent protocol
 
@@ -140,7 +131,7 @@ Send arbitrary supported protocol requests through `./bin/yobro raw` with JSON o
 
 Downloads use the initiating WebKit session, including its cookies. Files are stored under `~/Downloads/YOBRO`; test sessions with `YOBRO_HOME` use `YOBRO_HOME/Downloads`. Transfers use a hidden temporary file, then move to the final filename after completion. Existing files are never overwritten. Cancellation and failure remove the partial file; completed files are never automatically opened. Progress and history are visible in the Downloads library. Interrupted downloads are marked on restart; resumable downloads are not yet implemented.
 
-`find` uses native WebKit text search and returns `found`, not a total match count. `history` reads saved visits, and `panel` opens `history`, `downloads`, `palette`, `agents`, or closes panels with `none`. History and closed tabs are local, shared across spaces, and included in the access controlled by the Agent panel's pause switch.
+`find` uses native WebKit text search and returns `found`, not a total match count. `history` reads saved visits, and `panel` opens `history`, `downloads`, `palette`, `agents`, or closes panels with `none`. History and closed tabs are local and shared across spaces. `history`, `downloads` and the user's own entries in `tabs` are only answered after enabling them under Settings → Privacy; private tabs are never listed.
 
 The page bridge runs in a WebKit isolated content world, separate from page JavaScript. It reads DOM elements, including open shadow roots, and invokes DOM actions. Password values are redacted from snapshots; other visible page data is available to an authorized local agent. Field values are not retained in the activity log. Website content is untrusted input for agents and must not override their user's instructions.
 
@@ -148,15 +139,13 @@ The page bridge runs in a WebKit isolated content world, separate from page Java
 
 This is a working browser foundation, not feature parity with Arc or Safari. WebExtensions and browser-data import are available through Settings; compatibility and supported migration formats are documented in [Extensions and import](docs/EXTENSIONS-IMPORT.md). Login saving and user-selected autofill support standard top-level HTTPS forms, including same-origin email-first flows. Saving requires confirmation; credentials remain in the profile’s macOS Keychain and are offered only for the exact HTTPS origin. Use the key in the sidebar address bar to fill; forms are never submitted automatically. Cross-origin iframes, closed shadow roots, signup/password-change forms and unusual custom login controls are not covered. No per-space cookie isolation or automatic updates yet. Embedded frames are listed but their content is not yet controlled; closed shadow roots and canvas-only interfaces are not covered. Some websites require trusted input events or reject embedded browsers. There is no visual fallback. Website alert/confirm dialogs may require the user to respond. Popups open a new tab, but complex popup-based sign-in needs further testing.
 
-The **built-in Space assistant** opens on the right with ⇧⌘A. Configure a full OpenAI-compatible Chat Completions URL and a tool-capable model in the panel. HTTPS is required except for loopback servers. API keys are kept only for the current profile session, never on disk, and endpoint edits clear the key. The wire format follows the [Chat Completions reference](https://developers.openai.com/api/reference/resources/chat).
+The **built-in assistant** opens on the right with ⇧⌘A. Configure OpenRouter or a full OpenAI-compatible Chat Completions URL and a tool-capable model in the panel. HTTPS is required except for loopback servers. The API key is stored in the macOS Keychain of this Mac only. The wire format follows the [Chat Completions reference](https://developers.openai.com/api/reference/resources/chat).
 
-Each profile stores its own `space-chat.json` and `chat-connection.json`. Space renaming moves its timeline, notes and unsent context. **Work in Space** on a loaded email stages summary, link-opening, price-check or reply-drafting prompts; nothing is transmitted until Send. Sending includes the current Space's recent conversation, tab titles/URLs and selected email text. On-demand page reads go to the configured provider too. The panel shows this disclosure and lets users remove staged email context. History includes mail text and is stored locally; retention controls and encryption beyond macOS protections are not yet included.
+YoBro does not bundle a local AI model. With a cloud provider, the chat, the titles and addresses of the Space's non-private tabs and every page the assistant reads go to that provider. Detected email addresses, credentials, phone numbers and postal addresses are replaced by placeholders first and restored locally. A localhost endpoint keeps YoBro's requests on the Mac, although YoBro cannot guarantee what separately installed local-server software does with them. The panel shows the active data path.
 
-YoBro does not bundle a local AI model. When a cloud provider such as OpenRouter or OpenAI is configured, chat plus every email, page, or note content retrieved by the agent is sent to that provider for processing. A localhost endpoint keeps YoBro's requests on the Mac, although YoBro cannot guarantee what separately installed local-server software does with them. The agent panel displays the active data path before use.
+The in-app assistant does not depend on the external agent switch: that switch only opens the local control socket. Switching Space or profile cancels in-flight model work. Calls are bounded to 32 steps; model-response streaming is not included.
 
-The assistant can read and operate pages in its Space using document-scoped element references, and it requests approval before opening a URL through `open_url`. It can prepare mail drafts and request explicit approval before SMTP sending. Approvals can be declined and expire on pause or Space/profile switch. Switching also cancels in-flight model work. Drafts are held in memory while YoBro runs; there is no persistent mail-draft object, task-list object or per-Space mailbox binding yet. Calls are bounded; model-response streaming and native provider-specific APIs are not included. A model supporting the compatible tool-call format must be supplied; YoBro bundles no model or subscription.
-
-External agents continue to use the local CLI/socket and retain their own approval policies. The built-in chat's restricted tools and approval UI do not wrap or restrict external agents beyond the existing local-access switch.
+External agents continue to use the local CLI/socket and retain their own approval policies. The built-in assistant's restrictions do not apply to external agents beyond the local-access switch in Settings → Agents.
 
 The implementation is original; no source from AgenticBrowser has been copied. That project's separate Electron and headless Chrome architecture was unsuitable for the WebKit requirement.
 

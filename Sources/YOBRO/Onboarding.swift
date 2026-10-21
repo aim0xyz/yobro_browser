@@ -16,10 +16,7 @@ extension BrowserModel {
         do {
             try OnboardingProgress.finish(home:home)
             showOnboarding = false
-            focusAddress = true
-            if tabs.isEmpty {
-                newTab(url: "")
-            }
+            openCommandBar(.newTab)
         }
         catch { notice = L("Die Einrichtung konnte nicht gespeichert werden: ") + error.localizedDescription }
     }
@@ -34,14 +31,14 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing:20) {
             HStack {
                 YOBROMark(size:32)
-                Text(L("Willkommen in YoBro")).font(.system(size:28,design:.serif))
+                Text(L("Willkommen in YoBro")).font(.system(size:24,weight:.semibold))
                 Spacer()
                 Text("\(step + 1) / 4").font(.system(size:12,design:.monospaced)).foregroundStyle(.secondary)
             }
             Group {
                 if step == 0 {
                     VStack(alignment:.leading,spacing:20) {
-                        Text(L("Dein Browser. Dein Bro.", "Your browser. Your bro.")).font(.system(size:30,design:.serif))
+                        Text(L("Dein Browser. Dein Bro.", "Your browser. Your bro.")).font(.system(size:28,weight:.semibold))
                         Text(L("Nimm Lesezeichen, Verlauf und offene Tabs mit. Wähle selbst, ob du auch Passwörter und Cookies übertragen möchtest.")).font(.system(size:15)).lineSpacing(5)
                         HStack(spacing:18) { ForEach(["Safari","Arc","Brave","Chrome","Firefox"],id:\.self) { Text($0).font(.system(size:13,weight:.medium)) } }.foregroundStyle(moss)
                         Text(L("YoBro erkennt vorhandene Profile. Du siehst vor dem Import, was verfügbar ist. Deinen bisherigen Browser kannst du weiter nutzen.")).font(.system(size:13)).foregroundStyle(.secondary)
@@ -53,7 +50,7 @@ struct OnboardingView: View {
                     AgentConnectionsView(model: model)
                 } else {
                     VStack(alignment:.leading,spacing:20) {
-                        Label(L("Dein YoBro ist bereit"),systemImage:"checkmark.circle").font(.system(size:26,design:.serif)).foregroundStyle(moss)
+                        Label(L("Dein YoBro ist bereit"),systemImage:"checkmark.circle").font(.system(size:24,weight:.semibold))
                         Text(result.isEmpty ? L("Du kannst deine Browserdaten jederzeit in den Einstellungen importieren.") : result).font(.system(size:13)).textSelection(.enabled)
                         Text(L("Mit ⌘T öffnest du einen Tab. Spaces und Ordner helfen dir beim Sortieren.")).font(.system(size:14)).foregroundStyle(.secondary)
                         Spacer()

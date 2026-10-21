@@ -12,7 +12,7 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 YOBROMark(size: 24)
-                Text(L("Deine Bibliothek")).font(.system(size: 22, weight: .medium, design: .serif))
+                Text(L("Deine Bibliothek")).font(.system(size: 20, weight: .semibold))
                 Spacer()
                 Button { model.librarySection = nil } label: { Image(systemName: "xmark").padding(6) }.buttonStyle(YOBROButtonStyle()).keyboardShortcut(.cancelAction)
             }.padding(25)
@@ -167,81 +167,9 @@ struct LibraryView: View {
     private func empty(_ title: String, _ detail: String, _ icon: String) -> some View {
         VStack(spacing: 14) {
             Image(systemName: icon).font(.system(size: 32, weight: .light)).foregroundStyle(moss)
-            Text(title).font(.system(size: 23, design: .serif))
+            Text(title).font(.system(size: 18, weight: .medium))
             Text(detail).font(.system(size: 12)).foregroundStyle(ink.opacity(0.5))
         }.frame(maxWidth: .infinity).padding(.vertical, 72)
-    }
-}
-
-struct PaletteResult: Identifiable {
-    let id: String
-    let title: String
-    let subtitle: String
-    let icon: String
-    let tabID: UUID?
-    let url: String?
-}
-
-struct CommandPalette: View {
-    @ObservedObject var model: BrowserModel
-    @State private var query = ""
-    @State private var selected = 0
-    @FocusState private var focused: Bool
-    private var results: [PaletteResult] {
-        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let open = model.tabs.filter { term.isEmpty || $0.title.localizedCaseInsensitiveContains(term) || $0.url.localizedCaseInsensitiveContains(term) }
-            .prefix(6).map { PaletteResult(id: $0.id.uuidString, title: $0.url.isEmpty ? L("Neue Seite") : $0.title, subtitle: L("Offener Tab · \($0.space)", "Open tab · \($0.space)"), icon: "rectangle.on.rectangle", tabID: $0.id, url: nil) }
-        let addresses = Set(model.tabs.map(\.url))
-        let recent = model.matchingHistory(term).filter { !addresses.contains($0.url) }.prefix(4)
-            .map { PaletteResult(id: $0.id.uuidString, title: $0.title, subtitle: URL(string: $0.url)?.host ?? $0.url, icon: "clock", tabID: nil, url: $0.url) }
-        let search = term.isEmpty ? [] : [PaletteResult(id: "search", title: L("„\(term)“ öffnen", "Open “\(term)”"), subtitle: L("URL öffnen oder mit DuckDuckGo suchen"), icon: "arrow.up.right", tabID: nil, url: term)]
-        return open + recent + search
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 14) {
-                Image(systemName: "magnifyingglass").font(.system(size: 20)).foregroundStyle(moss)
-                TextField(L("Tabs, Verlauf oder das ganze Web …"), text: $query).textFieldStyle(.plain).font(.system(size: 18)).focused($focused).onSubmit { activate() }
-                Button { model.showPalette = false } label: { Text("esc").font(.system(size: 10, design: .monospaced)).padding(6).background(moss.opacity(0.08), in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(YOBROButtonStyle()).keyboardShortcut(.cancelAction)
-            }.padding(24)
-            Divider().opacity(0.4)
-            ScrollViewReader { reader in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(query.isEmpty ? L("DEIN WEB, EINEN SPRUNG ENTFERNT") : L("TREFFER")).font(.system(size: 9, weight: .medium)).tracking(1.5).foregroundStyle(ink.opacity(0.4)).padding(.horizontal, 12).padding(.vertical, 13)
-                        ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
-                            Button { selected = index; activate() } label: {
-                                HStack(spacing: 14) {
-                                    Image(systemName: result.icon).foregroundStyle(moss).frame(width: 21)
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(result.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                        Text(result.subtitle).font(.system(size: 10)).foregroundStyle(ink.opacity(0.5)).lineLimit(1)
-                                    }
-                                    Spacer()
-                                    if index == selected { Image(systemName: "return").font(.system(size: 12)).foregroundStyle(moss) }
-                                }.padding(12).background(index == selected ? moss.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                            }.buttonStyle(YOBROButtonStyle()).id(index)
-                        }
-                    }.padding(.horizontal, 12)
-                }.onChange(of: selected) { _, value in reader.scrollTo(value) }
-            }.frame(maxHeight: 420)
-            HStack {
-                Text(L("↑ ↓ auswählen     ↵ öffnen")).font(.system(size: 10)).foregroundStyle(ink.opacity(0.45))
-                Spacer()
-                Text("YoBro").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(2).foregroundStyle(moss)
-            }.padding(18)
-        }.frame(width: 610).background(paper).foregroundStyle(ink)
-            .onAppear { focused = true }
-            .onChange(of: query) { _, _ in selected = 0 }
-            .onKeyPress(.downArrow) { selected = min(selected + 1, max(0, results.count - 1)); return .handled }
-            .onKeyPress(.upArrow) { selected = max(0, selected - 1); return .handled }
-    }
-    private func activate() {
-        guard results.indices.contains(selected) else { return }
-        let result = results[selected]
-        if let id = result.tabID { model.select(id) }
-        else if let url = result.url { model.newTab(url: url) }
-        model.showPalette = false
     }
 }
 
@@ -260,44 +188,12 @@ struct PageFindBar: View {
             Button { Task { await tab.find(tab.findQuery) } } label: { Image(systemName: "chevron.down") }.yobroHelp(L("Nächster Treffer"))
             Button { tab.showFind = false; Task { await tab.find("") } } label: { Image(systemName: "xmark") }.keyboardShortcut(.cancelAction)
         }.buttonStyle(YOBROButtonStyle()).font(.system(size: 12)).padding(7)
-            .background(paper, in: RoundedRectangle(cornerRadius: 11)).shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+            .background(paper, in: RoundedRectangle(cornerRadius: Chrome.radius)).overlay(RoundedRectangle(cornerRadius: Chrome.radius).strokeBorder(Chrome.hairline)).shadow(color: .black.opacity(0.12), radius: 16, y: 6)
             .onAppear { query = tab.findQuery; focused = true }
             .onChange(of: tab.findQuery) { _, value in query = value }
             .appearanceTask(id: query) {
                 try? await Task.sleep(nanoseconds: 180_000_000)
                 if !Task.isCancelled && query != tab.findQuery { await tab.find(query) }
             }
-    }
-}
-
-struct LibraryButtons: View {
-    @ObservedObject var model: BrowserModel
-    @ObservedObject var downloads: DownloadStore
-    var body: some View {
-        HStack(spacing: 3) {
-            Button { model.librarySection = .history } label: {
-                Label(L("Verlauf", "History"), systemImage: "clock.arrow.circlepath")
-                    .labelStyle(.iconOnly).frame(maxWidth: .infinity, minHeight: 28)
-            }
-            .yobroHelp(L("Verlauf · ⌘Y"))
-            .accessibilityLabel(L("Verlauf"))
-            Button { model.librarySection = .bookmarks } label: {
-                Label(L("Lesezeichen", "Bookmarks"), systemImage: "bookmark")
-                    .labelStyle(.iconOnly).frame(maxWidth: .infinity, minHeight: 28)
-            }
-            .yobroHelp(L("Lesezeichen · ⌥⌘B", "Bookmarks · ⌥⌘B"))
-            .accessibilityLabel(L("Lesezeichen", "Bookmarks"))
-            Button { model.librarySection = .downloads } label: {
-                Label("Downloads", systemImage: "arrow.down.circle")
-                    .labelStyle(.iconOnly).frame(maxWidth: .infinity, minHeight: 28)
-            }
-            .yobroHelp("Downloads · ⇧⌘J")
-            .accessibilityLabel("Downloads")
-        }
-        .buttonStyle(YOBROButtonStyle(minimumSize: 28))
-        .font(.system(size: 12))
-        .foregroundStyle(moss)
-        .padding(3)
-        .background(YOBROTheme.surface.opacity(0.20), in: RoundedRectangle(cornerRadius: 10))
     }
 }

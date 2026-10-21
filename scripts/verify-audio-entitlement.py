@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail packaging when the signed app cannot request microphone or Apple Events access."""
+"""Fail packaging when websites in the signed app cannot request the microphone or camera."""
 import plistlib
 import subprocess
 import sys
@@ -15,8 +15,8 @@ def verify(app: Path) -> None:
     entitlements = plistlib.loads(result.stdout[xml:])
     if entitlements.get("com.apple.security.device.audio-input") is not True:
         raise SystemExit("YoBro is signed without the Audio Input entitlement")
-    if entitlements.get("com.apple.security.automation.apple-events") is not True:
-        raise SystemExit("YoBro is signed without the Apple Events entitlement")
+    if entitlements.get("com.apple.security.device.camera") is not True:
+        raise SystemExit("YoBro is signed without the Camera entitlement")
 
 
 if __name__ == "__main__":

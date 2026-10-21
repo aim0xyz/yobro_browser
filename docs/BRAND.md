@@ -3,7 +3,7 @@
 ## Name system
 
 - Product name: **YoBro**
-- Spoken name and activation phrase: **“Yo Bro”**
+- Spoken name: **“Yo Bro”**
 - Name idea: **YO = Your**, **BRO = Browser**, and “bro” is the helpful companion at your side.
 - Brand signature: **Your browser. Your bro.**
 - Benefit-led slogan: **The browser that has your back.**

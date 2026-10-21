@@ -90,30 +90,6 @@ private struct WebPageDialogOverlay: View {
     }
 }
 
-/// Keyboard selection for the address bar's history suggestions.
-///
-/// `nil` is the initial state and means "open exactly what was typed". Without
-/// it, every keystroke reset the selection to the first suggestion and Enter
-/// silently opened that history URL instead of the address the user entered.
-enum SuggestionSelection {
-    static func next(_ current: Int?, count: Int) -> Int? {
-        guard count > 0 else { return nil }
-        guard let current else { return 0 }
-        return min(current + 1, count - 1)
-    }
-
-    /// Walking up past the first suggestion returns to the typed text.
-    static func previous(_ current: Int?) -> Int? {
-        guard let current, current > 0 else { return nil }
-        return current - 1
-    }
-
-    static func destination(_ current: Int?, suggestions: [HistoryEntry], typed: String) -> String {
-        guard let current, suggestions.indices.contains(current) else { return typed }
-        return suggestions[current].url
-    }
-}
-
 private struct SidebarTabFrameKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
@@ -234,105 +210,74 @@ private struct SidebarDragEndObserver: NSViewRepresentable {
     }
 }
 
+/// The window: a sidebar on the Space's tone, pages as white cards beside it,
+/// and the assistant as a card on the right.
 struct BrowserShell: View {
     @ObservedObject var model: BrowserModel
     @State private var sidebarOverlayCloseTask: Task<Void, Never>?
 
+    private var tone: SpaceTone { model.spaceTone(for: model.space) }
+
     var body: some View {
         HStack(spacing: 0) {
             if model.showSidebar {
-                sidebar.frame(width: 248)
-            } else if !model.sidebarAutoHide {
-                CompactSidebar(model: model, mail: model.mail)
+                ShellSidebar(model: model).frame(width: Chrome.sidebarWidth)
             }
-            Group {
-                if model.agentWorkspaceVisible, let agent = model.agentTab {
-                    HSplitView {
-                        userAgentSplitPane
-                            .ignoresSafeArea(.container, edges: .top)
-                            .frame(minWidth: 280, maxWidth: .infinity)
-                            .layoutPriority(1)
-                        agentSplitPane(agent)
-                            .ignoresSafeArea(.container, edges: .top)
-                            .frame(minWidth: 294, idealWidth: 294)
-                    }
-                } else {
-                    userWorkspace
-                }
+            workspace
+                .padding(.vertical, Chrome.inset)
+                .padding(.leading, model.showSidebar ? 0 : Chrome.inset)
+                .padding(.trailing, Chrome.inset)
+                .frame(minWidth: 280)
+            if model.showAgent {
+                SpaceChatPanel(browser: model, chat: model.chat)
+                    .frame(width: 340)
+                    .pageCard()
+                    .padding(.vertical, Chrome.inset)
+                    .padding(.trailing, Chrome.inset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
-            .ignoresSafeArea(.container, edges: .top)
-            .frame(minWidth: 280)
-            .overlay(alignment: .top) {
-                if let undoID = model.closedTabUndoID {
-                    ClosedTabUndo(model: model, undoID: undoID)
-                        .padding(.top, 14)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            AgentPanelRail(model: model)
         }
+        .ignoresSafeArea(.container, edges: .top)
         .overlay(alignment: .leading) {
-            if model.sidebarAutoHide && !model.showSidebar {
-                ZStack(alignment: .leading) {
-                    let overlayShape = SidebarOverlayShape(radius: 22)
-                    let isVisible = model.sidebarOverlayVisible || model.draggingTabID != nil || model.draggingFolderID != nil
-                    SidebarOverlayHost(visible: isVisible) {
-                        sidebar
-                            .frame(width: 248)
-                            .frame(maxHeight: .infinity)
-                            .background { overlayShape.fill(.ultraThinMaterial) }
-                            .overlay { overlayShape.stroke(ink.opacity(0.14), lineWidth: 1).allowsHitTesting(false) }
-                    }
-                    .frame(width: 248)
-                    .frame(maxHeight: .infinity)
-                    .onHover { inside in
-                        guard model.sidebarOverlayVisible else { return }
-                        if inside { revealSidebarOverlay() }
-                        else { scheduleSidebarOverlayClose() }
-                    }
-                    if !isVisible {
-                        // The edge trigger stays narrow so the hidden sidebar
-                        // leaves the webpage interactive right beside it.
-                        Color.clear
-                            .frame(width: 8)
-                            .frame(maxHeight: .infinity)
-                            .contentShape(Rectangle())
-                            .onHover { inside in
-                                if inside { revealSidebarOverlay() }
-                            }
-                    }
-                }
-                .frame(width: 248)
-            }
+            if !model.showSidebar { hiddenSidebar }
         }
         // Keep the single native macOS traffic-light host above the temporary
-        // sidebar material as well as the ordinary browser chrome.
+        // sidebar overlay as well as the ordinary browser chrome.
         .overlay(alignment: .topLeading) {
             WindowControls()
                 .frame(width: 60, height: 32)
-                .padding(.leading, model.showSidebar || model.sidebarAutoHide ? 17 : 10)
+                .padding(.leading, 18)
                 .padding(.top, 10)
                 .opacity(sidebarChromeVisible ? 1 : 0)
                 .allowsHitTesting(sidebarChromeVisible)
                 .accessibilityHidden(!sidebarChromeVisible)
                 .ignoresSafeArea(.container, edges: .top)
         }
-        .ignoresSafeArea(.container, edges: .top)
         .background(YOBROArrowCursorRegion().ignoresSafeArea())
-        .background(LinearGradient(colors: [YOBROTheme.chromeTop, YOBROTheme.chromeBottom], startPoint: .topLeading, endPoint: .bottomTrailing))
+        .background(tone.background.ignoresSafeArea())
         .overlay(alignment: .bottomTrailing) {
-            // Keep this observer mounted even while there are no downloads so
-            // the first download can make the status appear immediately.
-            ActiveDownloadStatus(model: model, downloads: model.downloads)
-                .padding(.trailing, 22).padding(.bottom, 22)
+            VStack(alignment: .trailing, spacing: 8) {
+                if let undoID = model.closedTabUndoID {
+                    ClosedTabUndo(model: model, undoID: undoID)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                // Keep this observer mounted even while there are no downloads so
+                // the first download can make the status appear immediately.
+                ActiveDownloadStatus(model: model, downloads: model.downloads)
+            }
+            .padding(.trailing, 22).padding(.bottom, 22)
         }
+        .overlay { AgentActivityFrame(model: model, chat: model.chat) }
         .overlay {
-            AgentActivityFrame(model: model, chat: model.chat, voice: model.voice)
-        }
-        .overlay(alignment: .bottomLeading) {
-            VoiceStatusHUD(model: model, chat: model.chat, voice: model.voice)
-                .padding(.leading, 24)
-                .padding(.bottom, 24)
+            if let mode = model.commandBar {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.06).ignoresSafeArea()
+                        .onTapGesture { model.commandBar = nil }
+                    CommandBar(model: model, mode: mode)
+                        .padding(.top, 120)
+                }
+                .transition(.opacity)
+            }
         }
         .overlay {
             if let dialog = model.webPageDialog {
@@ -341,28 +286,18 @@ struct BrowserShell: View {
                 YOBRODialogOverlay(icon: "info.circle.fill", title: "YoBro", message: notice, confirmTitle: "OK", confirm: { model.notice = nil })
             }
         }
+        .environment(\.spaceTone, tone)
         .foregroundStyle(ink)
         .environment(\.locale, YOBROLanguage.locale)
+        .animation(.easeOut(duration: 0.45), value: tone)
         .animation(.easeInOut(duration: 0.2), value: model.showAgent)
         .animation(.easeInOut(duration: 0.2), value: model.showSidebar)
-        .appearanceTask {
-            if Bundle.main.bundleIdentifier == "local.yobro.browser" {
-                await model.voice.resumeIfEnabled(browser: model)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            if Bundle.main.bundleIdentifier == "local.yobro.browser" {
-                Task { await model.voice.resumeIfEnabled(browser: model) }
-            }
-        }
+        .animation(.easeOut(duration: 0.12), value: model.commandBar)
+        .animation(.easeInOut(duration: 0.2), value: model.agentWorkspaceVisible)
         .onDisappear { sidebarOverlayCloseTask?.cancel() }
-        .onChange(of: model.showSidebar) { _, shown in
+        .onChange(of: model.showSidebar) { _, _ in
             sidebarOverlayCloseTask?.cancel()
-            if shown { model.sidebarOverlayVisible = false }
-        }
-        .onChange(of: model.sidebarAutoHide) { _, enabled in
-            sidebarOverlayCloseTask?.cancel()
-            if !enabled { model.sidebarOverlayVisible = false }
+            model.sidebarOverlayVisible = false
         }
         .onChange(of: model.extensionActionPopupPresented) { _, presented in
             if !presented && !pointerIsInsideSidebarOverlay() { scheduleSidebarOverlayClose() }
@@ -372,25 +307,110 @@ struct BrowserShell: View {
         }
         .onChange(of: model.draggingTabID) { _, _ in sidebarDragStateChanged() }
         .onChange(of: model.draggingFolderID) { _, _ in sidebarDragStateChanged() }
-        .animation(.easeInOut(duration: 0.2), value: model.agentWorkspaceVisible)
         .sheet(item: $model.librarySection) { section in LibraryView(model: model, downloads: model.downloads, section: section) }
         .sheet(isPresented: $model.showOnboarding) { OnboardingView(model: model) }
         .sheet(isPresented: $model.showSettings) { BrowserSettings(model: model, section: model.settingsSection) }
         .sheet(isPresented: $model.showProfileEditor) {
             if let profiles = model.profileSession { ProfileEditor(profiles: profiles, creating: model.creatingProfile) }
         }
-        .sheet(isPresented: $model.showPalette) { CommandPalette(model: model) }
         .background(SidebarDragEndObserver(model: model))
+    }
+
+    /// The hidden sidebar slides in over the page from the left edge.
+    private var hiddenSidebar: some View {
+        ZStack(alignment: .leading) {
+            let isVisible = model.sidebarOverlayVisible || model.draggingTabID != nil || model.draggingFolderID != nil
+            // The overlay is hosted in its own NSHostingView, which does not
+            // inherit this view's environment.
+            SidebarOverlayHost(visible: isVisible) {
+                ShellSidebar(model: model)
+                    .frame(width: Chrome.sidebarWidth)
+                    .frame(maxHeight: .infinity)
+                    .background {
+                        SidebarOverlayShape(radius: 14).fill(tone.background)
+                            .shadow(color: .black.opacity(0.22), radius: 18, x: 4)
+                    }
+                    .environment(\.spaceTone, tone)
+                    .environment(\.locale, YOBROLanguage.locale)
+                    .foregroundStyle(ink)
+            }
+            .frame(width: Chrome.sidebarWidth + 20)
+            .frame(maxHeight: .infinity)
+            .onHover { inside in
+                guard model.sidebarOverlayVisible else { return }
+                if inside { revealSidebarOverlay() }
+                else { scheduleSidebarOverlayClose() }
+            }
+            if !isVisible {
+                // The edge trigger stays narrow so the page stays interactive
+                // right beside it.
+                Color.clear
+                    .frame(width: 8)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { revealSidebarOverlay() }
+                    }
+            }
+        }
+        .frame(width: Chrome.sidebarWidth + 20)
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    @ViewBuilder
+    private var workspace: some View {
+        if model.agentWorkspaceVisible, let agent = model.agentTab {
+            // The agent owns the right half, so a user split collapses to its
+            // active page instead of squeezing three pages side by side.
+            HSplitView {
+                singlePage
+                    .padding(.trailing, Chrome.inset / 2)
+                    .frame(minWidth: 280, maxWidth: .infinity)
+                    .layoutPriority(1)
+                ShellPane(tab: agent, model: model, role: .agent)
+                    .padding(.leading, Chrome.inset / 2)
+                    .frame(minWidth: 294, idealWidth: 380)
+                    .accessibilityIdentifier("agent-workspace")
+            }
+        } else {
+            userWorkspace
+        }
+    }
+
+    @ViewBuilder
+    private var userWorkspace: some View {
+        if let active = model.activeID, let pair = model.splitPairs.first(where: { $0.contains(active) }),
+           let first = model.tabs.first(where: { $0.id == pair.first }), let second = model.tabs.first(where: { $0.id == pair.second }) {
+            HSplitView {
+                ShellPane(tab: first, model: model, role: .split)
+                    .padding(.trailing, Chrome.inset / 2)
+                    .frame(minWidth: 180)
+                ShellPane(tab: second, model: model, role: .split)
+                    .padding(.leading, Chrome.inset / 2)
+                    .frame(minWidth: 180)
+            }
+        } else {
+            singlePage
+        }
+    }
+
+    @ViewBuilder
+    private var singlePage: some View {
+        if let tab = model.active {
+            TabContent(tab: tab, model: model).id(tab.id).pageCard()
+        } else {
+            StartPage(model: model).pageCard()
+        }
+    }
+
+    private var sidebarChromeVisible: Bool {
+        model.showSidebar || model.sidebarOverlayVisible
     }
 
     private func revealSidebarOverlay() {
         sidebarOverlayCloseTask?.cancel()
         sidebarOverlayCloseTask = nil
         model.sidebarOverlayVisible = true
-    }
-
-    private var sidebarChromeVisible: Bool {
-        !model.sidebarAutoHide || model.showSidebar || model.sidebarOverlayVisible
     }
 
     private func scheduleSidebarOverlayClose() {
@@ -421,14 +441,14 @@ struct BrowserShell: View {
         model.draggingTabID != nil || model.draggingFolderID != nil
     }
 
-
     private func pointerIsInsideSidebarOverlay() -> Bool {
         guard let window = NSApp.keyWindow else { return false }
         let point = window.mouseLocationOutsideOfEventStream
-        return point.x >= 0 && point.x <= 248 && point.y >= 0 && point.y <= window.frame.height
+        return point.x >= 0 && point.x <= Chrome.sidebarWidth && point.y >= 0 && point.y <= window.frame.height
     }
 
     private func sidebarDragStateChanged() {
+        guard !model.showSidebar else { return }
         if sidebarDragIsActive {
             model.hoveredFolderID = nil
             revealSidebarOverlay()
@@ -436,280 +456,328 @@ struct BrowserShell: View {
             scheduleSidebarOverlayClose()
         }
     }
+}
 
-    private func restoreBrowserKeyboardFocus() {
-        guard !model.showMail, let webView = model.active?.webView, let window = webView.window else { return }
-        window.makeFirstResponder(webView)
-    }
+/// A page shown beside another one: a split-view half or the agent's tab.
+/// YAB gives each half its own slim title band.
+private struct ShellPane: View {
+    enum Role { case split, agent }
+    @ObservedObject var tab: BrowserTab
+    @ObservedObject var model: BrowserModel
+    let role: Role
 
-    @ViewBuilder
-    private var userWorkspace: some View {
-        if model.showMail {
-            mailWorkspace
-        } else {
-            VStack(spacing: 0) {
-                Group {
-                    if let active = model.activeID, let pair = model.splitPairs.first(where: { $0.contains(active) }),
-                       let first = model.tabs.first(where: { $0.id == pair.first }), let second = model.tabs.first(where: { $0.id == pair.second }) {
-                        HSplitView {
-                            splitPane(first)
-                                .ignoresSafeArea(.container, edges: .top)
-                                .frame(minWidth: 180)
-                            splitPane(second)
-                                .ignoresSafeArea(.container, edges: .top)
-                                .frame(minWidth: 180)
-                        }
-                    } else if let tab = model.active { TabContent(tab: tab, model: model).id(tab.id) }
-                    else { NewTabPage(tab: nil, model: model) }
-                }.padding(10)
-            }
+    private var focused: Bool { role == .split && model.activeID == tab.id }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            band
+            Divider().opacity(0.5)
+            TabContent(tab: tab, model: model).id(tab.id).allowsHitTesting(role != .agent)
         }
-    }
-
-    private var mailWorkspace: some View {
-        MailWorkspace(store: model.mail, close: { model.presentMail(false) }, openURL: { model.newTab(url: $0.absoluteString) }, askAgent: { item, body, prompt in
-            model.chat.stageMail(item, body: body, prompt: prompt, space: model.space)
-            model.showAgent = true
-        })
-        .clipShape(RoundedRectangle(cornerRadius: 14)).padding(10)
-    }
-
-    @ViewBuilder
-    private var userAgentSplitPane: some View {
-        if model.showMail {
-            mailWorkspace
-        } else if let tab = model.active {
-            parallelPane(tab, owner: L("DU · LINKS", "YOU · LEFT"), color: moss, interactive: true)
-        } else {
-            paper
-        }
-    }
-
-    private func agentSplitPane(_ tab: BrowserTab) -> some View {
-        parallelPane(tab, owner: L("AGENT · RECHTS", "AGENT · RIGHT"), color: brandOrange, interactive: false)
-            .accessibilityIdentifier("agent-workspace")
-    }
-
-    private func parallelPane(_ tab: BrowserTab, owner: String, color: Color, interactive: Bool) -> some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 8) {
-                Circle().fill(color).frame(width: 7, height: 7)
-                Text(tab.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                Spacer(minLength: 8)
-                Text(owner).font(.system(size: 8, weight: .bold, design: .rounded)).tracking(0.8).foregroundStyle(color)
-                if !interactive {
-                    Button { model.closeAgentWorkspace() } label: { Image(systemName: "xmark").frame(width: 22, height: 22) }
-                        .buttonStyle(.plain).yobroHelp(L("Agent-Browser schließen", "Close agent browser"))
-                }
-            }.padding(.horizontal, 9).frame(height: 27)
-            TabContent(tab: tab, model: model).id(tab.id).allowsHitTesting(interactive)
-        }.padding(6)
-    }
-
-    private func splitPane(_ tab: BrowserTab) -> some View {
-        VStack(spacing: 4) {
-            HStack {
-                Button { model.select(tab.id) } label: {
-                    HStack { Circle().fill(model.activeID == tab.id ? moss : ink.opacity(0.2)).frame(width: 6, height: 6); Text(tab.title).lineLimit(1); Spacer() }
-                }.buttonStyle(.plain).yobroHelp(L("Diese Seite aktivieren · ⌘R lädt sie neu", "Activate this page · ⌘R reloads it"))
-                Button { model.separateSplit(tab.id) } label: { Image(systemName: "rectangle") }.buttonStyle(.plain).yobroHelp(L("Splitview trennen · beide Tabs behalten"))
-            }.font(.system(size: 11)).padding(.horizontal, 8).frame(height: 26)
-            TabContent(tab: tab, model: model).id(tab.id)
-        }
+        .background(paper)
+        .pageCard()
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(model.activeID == tab.id ? moss.opacity(0.55) : .clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Chrome.radius, style: .continuous)
+                .strokeBorder(focused ? ink.opacity(0.3) : .clear, lineWidth: 1)
                 .allowsHitTesting(false)
         }
     }
 
-    private var sidebarToggle: some View {
-        Button { model.showSidebar.toggle() } label: {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: 14)).foregroundStyle(ink.opacity(0.55))
-                .frame(width: 32, height: 32)
+    private var band: some View {
+        HStack(spacing: 8) {
+            if role == .agent {
+                Circle().fill(brandOrange).frame(width: 7, height: 7)
+                Text(L("Assistent", "Assistant")).font(.system(size: 12, weight: .semibold)).foregroundStyle(brandOrange)
+            }
+            Button { if role == .split { model.activateSplitPane(tab.id) } } label: {
+                HStack(spacing: 6) {
+                    TabFavicon(tab: tab, size: 14)
+                    Text(tab.sidebarTitle).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .yobroHelp(role == .split ? L("Diese Seite aktivieren · ⌘R lädt sie neu", "Activate this page · ⌘R reloads it") : tab.url)
+            if role == .split {
+                Button { model.separateSplit(tab.id) } label: { Image(systemName: "rectangle") }
+                    .yobroHelp(L("Splitview trennen · beide Tabs behalten"))
+            } else {
+                Button { model.closeAgentWorkspace() } label: { Image(systemName: "xmark") }
+                    .yobroHelp(L("Assistenten-Tab schließen", "Close assistant tab"))
+            }
         }
-        .buttonStyle(YOBROButtonStyle(minimumSize: 32))
-        .yobroHelp(model.showSidebar ? L("Seitenleiste einklappen · ⌘S") : L("Seitenleiste einblenden · ⌘S"))
-        .accessibilityLabel(model.showSidebar ? L("Seitenleiste einklappen") : L("Seitenleiste einblenden"))
+        .buttonStyle(YOBROButtonStyle(minimumSize: 28))
+        .font(.system(size: 12))
+        .foregroundStyle(ink.opacity(0.75))
+        .padding(.leading, 12).padding(.trailing, 4)
+        .frame(height: 36)
+        .background(paper)
     }
+}
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                Color.clear.frame(width: 60, height: 32)
-                Spacer(minLength: 8)
+// MARK: - Sidebar
+
+private enum SidebarEditor: Equatable {
+    case newSpace, renameSpace(String), newFolder
+}
+
+private struct ShellSidebar: View {
+    @ObservedObject var model: BrowserModel
+    @State private var editor: SidebarEditor?
+    @State private var editorText = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Spacer(minLength: 0)
                 if let tab = model.active { SidebarHistoryControls(tab: tab) }
                 else { EmptySidebarHistoryControls() }
-                sidebarToggle
-            }.frame(height: 32, alignment: .center)
-                .padding(.horizontal, -7).padding(.top, 10).padding(.bottom, 16)
-            if let tab = model.active, !tab.isNote {
-                SidebarNavigation(model: model, tab: tab)
-            } else {
-                EmptySidebarNavigation(model: model, opensNewTab: model.active != nil)
             }
-
-            MailSidebarButton(store: model.mail, active: model.showMail) { model.presentMail() }
-                .padding(.top, 10).padding(.bottom, 12)
-
-            SpaceStrip(model: model)
-
-            SidebarTabList(model: model)
-            LibraryButtons(model: model, downloads: model.downloads)
-                .padding(.top, 4).padding(.bottom, 6)
+            .frame(height: 30)
+            .padding(.top, 11)
+            AddressPlate(model: model).padding(.top, Chrome.inset)
+            if model.visibleTabs.contains(where: \.pinned) {
+                PinGrid(model: model).padding(.top, Chrome.inset)
+            }
+            SidebarTabList(model: model, edit: beginEditing)
+                .padding(.top, Chrome.inset)
+                .popover(isPresented: editorPresented, arrowEdge: .trailing) { editorView }
             UpdateSidebarCard(updates: model.updates)
-            Button { model.showAgent.toggle() } label: {
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack(spacing: 7) {
-                        Circle().fill(model.agentUsageActive ? brandOrange : model.agentEnabled && model.bridgeStatus == L("Bereit") ? moss : .orange).frame(width: 6, height: 6)
-                        Text(agentSidebarTitle).font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        Image(systemName: model.agentWorkspaceVisible ? "rectangle.split.2x1.fill" : "arrow.up.right").font(.system(size: 10))
+            SidebarFooter(model: model, edit: beginEditing).padding(.top, 6)
+        }
+        .padding(.horizontal, Chrome.inset)
+        .padding(.bottom, Chrome.inset)
+    }
+
+    private func beginEditing(_ value: SidebarEditor) {
+        if case .renameSpace(let name) = value { editorText = name } else { editorText = "" }
+        editor = value
+    }
+
+    private var editorPresented: Binding<Bool> {
+        Binding(get: { editor != nil }, set: { if !$0 { editor = nil } })
+    }
+
+    @ViewBuilder
+    private var editorView: some View {
+        switch editor {
+        case .renameSpace:
+            YOBRONameEditor(icon: model.spaceIcon(for: model.space).rawValue, title: L("Space umbenennen", "Rename space"),
+                            detail: L("Gib deinem Bereich einen klaren Namen.", "Give your space a clear name."),
+                            text: $editorText, cancel: { editor = nil }, save: saveEditor)
+        case .newFolder:
+            YOBRONameEditor(icon: "folder.badge.plus", title: L("Neuer Ordner", "New folder"),
+                            detail: L("Sammle zusammengehörige Tabs an einem Ort.", "Keep related tabs together."),
+                            text: $editorText, cancel: { editor = nil }, save: saveEditor)
+        default:
+            YOBRONameEditor(icon: "square.stack.3d.up.badge.plus", title: L("Neuer Space", "New space"),
+                            detail: L("Gib deinem Bereich einen klaren Namen.", "Give your space a clear name."),
+                            text: $editorText, cancel: { editor = nil }, save: saveEditor)
+        }
+    }
+
+    private func saveEditor() {
+        do {
+            switch editor {
+            case .renameSpace(let original): try model.renameSpace(original, to: editorText)
+            case .newFolder: try model.addFolder(editorText)
+            default: try model.addSpace(editorText)
+            }
+            editor = nil
+        } catch { model.notice = error.localizedDescription }
+    }
+}
+
+private struct SidebarHistoryControls: View {
+    @ObservedObject var tab: BrowserTab
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Button { tab.webView.goBack() } label: { Image(systemName: "chevron.left") }
+                .disabled(!tab.canGoBack).yobroHelp(L("Zurück"))
+            Button { tab.webView.goForward() } label: { Image(systemName: "chevron.right") }
+                .disabled(!tab.canGoForward).yobroHelp(L("Vorwärts"))
+            Button { if tab.loading { tab.webView.stopLoading() } else { tab.webView.reload() } } label: {
+                Image(systemName: tab.loading ? "xmark" : "arrow.clockwise")
+            }.disabled(tab.url.isEmpty).yobroHelp(tab.loading ? L("Laden stoppen", "Stop loading") : L("Neu laden"))
+        }
+        .buttonStyle(ChromeButtonStyle())
+    }
+}
+
+private struct EmptySidebarHistoryControls: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(["chevron.left", "chevron.right", "arrow.clockwise"], id: \.self) { symbol in
+                Button {} label: { Image(systemName: symbol) }.disabled(true)
+            }
+        }
+        .buttonStyle(ChromeButtonStyle())
+        .accessibilityHidden(true)
+    }
+}
+
+/// The address of the active page. Clicking it opens the command field; the
+/// page actions appear on hover.
+private struct AddressPlate: View {
+    @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+    @State private var showingActions = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button { model.openCommandBar(.current) } label: {
+                HStack(spacing: 6) {
+                    if model.active?.isPrivate == true { Image(systemName: "eyeglasses").font(.system(size: 11)) }
+                    Text(label).font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail)
+                        .foregroundStyle(hasPage ? ink : tone.muted)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 10)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .yobroHelp((model.active?.url.isEmpty == false ? model.active!.url + " · " : "") + "⌘L")
+            .accessibilityLabel(L("Adresse öffnen · ⌘L"))
+            if hovering || showingActions {
+                HStack(spacing: 0) {
+                    if let tab = model.active, !tab.isPrivate, hasPage { LoginAutofillButton(login: tab.logins) }
+                    if hasPage {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(model.active?.url ?? "", forType: .string)
+                        } label: { Image(systemName: "link") }
+                            .buttonStyle(ChromeButtonStyle(size: 28))
+                            .yobroHelp(L("Adresse kopieren"))
                     }
-                    Text(model.agentWorkspaceVisible ? L("Du links · Agent rechts", "You left · agent right") : model.events.first.map { L("Zuletzt: \($0.action)", "Last: \($0.action)") } ?? L("Ein Browser. Für euch beide."))
-                        .font(.system(size: 10)).foregroundStyle(ink.opacity(0.5))
-                }.padding(13).background(YOBROTheme.surface.opacity(0.32), in: RoundedRectangle(cornerRadius: 12))
-            }.buttonStyle(YOBROButtonStyle())
-            if let profiles = model.profileSession {
-                ProfileMenu(profiles: profiles, model: model).padding(.top, 8).padding(.bottom, 6)
+                    Button { showingActions.toggle() } label: { Image(systemName: "slider.horizontal.3") }
+                        .buttonStyle(ChromeButtonStyle(size: 28))
+                        .yobroHelp(L("Kontrollzentrum", "Control Center"))
+                        .accessibilityLabel(L("Kontrollzentrum", "Control Center"))
+                        .popover(isPresented: $showingActions, arrowEdge: .trailing) {
+                            SidebarPageActions(model: model, tab: model.active, store: model.extensions) { showingActions = false }
+                        }
+                }
+                .foregroundStyle(tone.muted)
+                .padding(.trailing, 4)
+                .transition(.opacity)
             }
-
-        }.padding(.horizontal, 17)
+        }
+        .frame(height: Chrome.rowHeight)
+        .background(hovering ? Chrome.restHover : Chrome.rest, in: RoundedRectangle(cornerRadius: Chrome.radius))
+        .animation(.easeOut(duration: 0.15), value: hovering)
+        .onHover { hovering = $0 }
     }
 
-    private var agentSidebarTitle: String {
-        if !model.agentEnabled { return L("Agentenzugriff pausiert", "Agent access paused") }
-        if model.agentAction != nil { return L("Agent nutzt den Browser", "Agent is using the browser") }
-        if model.agentWorkspaceVisible { return L("Agent-Browser rechts geöffnet", "Agent browser open on the right") }
-        if model.agentUsageActive { return L("Agentensitzung aktiv", "Agent session active") }
-        return L("Bereit für deine Agenten", "Ready for your agents")
-    }
+    private var hasPage: Bool { !(model.active?.url.isEmpty ?? true) }
 
-}
-
-/// The panel and its edge button share one animating layout guide. The button's
-/// right edge is pinned to the browser/panel divider, so it cannot jump ahead of
-/// the sidebar transition when the parent HStack is resized.
-private struct AgentPanelRail: View {
-    @ObservedObject var model: BrowserModel
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            SpaceChatPanel(browser: model, chat: model.chat, voice: model.voice)
-                .frame(width: 320)
-                .offset(x: model.showAgent ? 0 : 320)
-                .opacity(model.showAgent ? 1 : 0)
-                .allowsHitTesting(model.showAgent)
-        }
-        .frame(width: model.showAgent ? 320 : 0)
-        .overlay(alignment: .leading) {
-            AgentQuickAccessButton(model: model)
-                .frame(width: 22, alignment: .trailing)
-                .offset(x: -22)
-        }
-        .animation(.easeInOut(duration: 0.24), value: model.showAgent)
+    private var label: String {
+        guard let tab = model.active, !tab.url.isEmpty else { return L("Suchen oder Adresse eingeben", "Search or enter address") }
+        if tab.isExtensionsHub { return L("Erweiterungen", "Extensions") }
+        guard let host = URL(string: tab.url)?.host else { return tab.title }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 }
 
-/// A slim vertical edge tab for the chat panel. Its rectangular silhouette is
-/// deliberately distinct from the pill-shaped status controls elsewhere.
-private struct AgentQuickAccessButton: View {
-    @ObservedObject var model: BrowserModel
-    @State private var hovered = false
+/// Favicon of a tab, with a symbol when the page has none.
+private struct TabFavicon: View {
+    @ObservedObject var tab: BrowserTab
+    var size: CGFloat = 16
 
     var body: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.24)) { model.showAgent.toggle() }
-        } label: {
-            VStack(spacing: 0) {
-                Text("A\nG\nE\nN\nT")
-                    .font(.system(size: 7, weight: .bold, design: .rounded))
-                    .tracking(0.4)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(0)
-            }
-            .foregroundStyle(model.showAgent ? paper : moss)
-            .frame(width: hovered ? 22 : 18, height: hovered ? 108 : 96)
-            .background(model.showAgent ? moss : YOBROTheme.surface.opacity(0.94), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(model.showAgent ? Color.clear : moss.opacity(0.22)))
-            .shadow(color: .black.opacity(0.14), radius: 7, x: -2, y: 2)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .opacity(hovered ? 1 : 0.52)
+        Group {
+            if tab.isPrivate { Image(systemName: "eyeglasses").font(.system(size: size * 0.8)) }
+            else if let icon = tab.favicon { Image(nsImage: icon).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: size * 0.22)) }
+            else { Image(systemName: tab.url.isEmpty ? "circle.dotted" : "globe").font(.system(size: size * 0.8)) }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// Pinned tabs as a grid of favicon tiles, like YAB's pins.
+private struct PinGrid: View {
+    @ObservedObject var model: BrowserModel
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Chrome.inset), count: 4), spacing: Chrome.inset) {
+            ForEach(model.visibleTabs.filter(\.pinned)) { tab in PinTile(tab: tab, model: model) }
+        }
+    }
+}
+
+private struct PinTile: View {
+    @ObservedObject var tab: BrowserTab
+    @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    private var selected: Bool { tab.id == model.activeID }
+
+    var body: some View {
+        Button { model.select(tab.id) } label: {
+            TabFavicon(tab: tab)
+                .foregroundStyle(tone.muted)
+                .frame(maxWidth: .infinity)
+                .frame(height: 45)
+                .background(selected ? Chrome.wash : hovering ? Chrome.restHover : Chrome.rest, in: RoundedRectangle(cornerRadius: Chrome.radius))
+                .overlay(alignment: .bottom) {
+                    if tab.loading { Capsule().fill(tone.muted.opacity(0.5)).frame(width: 14, height: 2).padding(.bottom, 5) }
+                }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { value in
-            withAnimation(.easeInOut(duration: 0.18)) { hovered = value }
+        .onHover { hovering = $0 }
+        .opacity(model.draggingTabID == tab.id ? 0.6 : 1)
+        .onDrag {
+            model.beginSidebarTabDrag(tab.id)
+            return NSItemProvider(object: tab.id.uuidString as NSString)
         }
-        .yobroHelp(model.showAgent ? L("Agentenpanel schließen", "Close agent panel") : L("Agentenpanel öffnen", "Open agent panel"))
-        .accessibilityLabel(model.showAgent ? L("Agentenpanel schließen", "Close agent panel") : L("Agentenpanel öffnen", "Open agent panel"))
-        .accessibilityIdentifier("agent-quick-access")
+        .onDrop(of: [UTType.plainText], delegate: TabReorderDropDelegate(targetID: tab.id, rowHeight: 45, model: model))
+        .contextMenu {
+            Button(L("Loslösen")) { tab.pinned = false; model.save() }
+            Menu(L("In Space verschieben")) {
+                ForEach(model.spaces.filter { $0 != tab.space }, id: \.self) { space in Button(space) { model.moveToSpace(tab.id, space: space) } }
+            }
+            Button(L("Tab löschen", "Delete tab")) { model.closeSidebarTab(tab.id) }
+        }
+        .yobroHelp(tab.sidebarHelp, placement: .trailing)
+        .accessibilityLabel(tab.sidebarTitle)
     }
 }
 
 private struct SidebarTabList: View {
     @ObservedObject var model: BrowserModel
+    let edit: (SidebarEditor) -> Void
+    @Environment(\.spaceTone) private var tone
     @State private var tabFrames: [UUID: CGRect] = [:]
     @State private var viewportFrame: CGRect = .null
     @State private var scrollRevision = 0
+
+    private var todayTabs: [BrowserTab] { model.visibleTabs.filter { !$0.pinned && $0.folderID == nil } }
 
     var body: some View {
         ScrollViewReader { proxy in
             ZStack {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 5) {
-                    if model.visibleTabs.contains(where: { $0.pinned }) {
-                        sectionLabel(L("ANGEPINNT"))
-                        VStack(spacing: 0) {
-                            ForEach(model.visibleTabs.filter { $0.pinned }) { TabRow(tab: $0, model: model) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        SpaceHeaderRow(model: model, edit: edit).padding(.bottom, 5)
+                        ForEach(model.folders.filter { $0.space == model.space }) { folder in
+                            SpaceFolderRow(folder: folder, model: model).padding(.bottom, 5)
                         }
+                        if !todayTabs.isEmpty {
+                            ClearTabsDivider { model.clearTodayTabs() }
+                        }
+                        NewTabRow(model: model).padding(.bottom, 5)
+                        ForEach(todayTabs) { TabRow(tab: $0, model: model) }
+                        Color.clear
+                            .frame(height: 44)
+                            .contentShape(Rectangle())
+                            .onDrop(of: [UTType.plainText], delegate: SidebarBottomDropDelegate(model: model))
                     }
-                    ForEach(model.folders.filter { $0.space == model.space }) { folder in SpaceFolderRow(folder: folder, model: model) }
-                    HStack {
-                        sectionLabel(L("DEINE TABS"))
-                        Spacer()
-                        Text("\(model.visibleTabs.filter { !$0.pinned }.count)").font(.system(size: 10, design: .monospaced)).opacity(0.4).padding(.top, 22)
-                    }
-                    VStack(spacing: 0) {
-                        ForEach(model.visibleTabs.filter { !$0.pinned && $0.folderID == nil }) { TabRow(tab: $0, model: model) }
-                    }
-                    VStack(spacing: 5) {
-                        Button { model.requestNewTab() } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "plus").font(.system(size: 14))
-                                Text(L("Neuer Tab")).font(.system(size: 12))
-                                Spacer()
-                                Text("⌘ T").font(.system(size: 10, design: .monospaced)).opacity(0.5)
-                            }.foregroundStyle(ink.opacity(0.55)).padding(11)
-                        }.buttonStyle(YOBROButtonStyle())
-                        Button { model.newNote() } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "note.text.badge.plus").font(.system(size: 14))
-                                Text(L("Neue Notiz", "New note")).font(.system(size: 12))
-                                Spacer()
-                                Text("⌘ N").font(.system(size: 10, design: .monospaced)).opacity(0.5)
-                            }.foregroundStyle(ink.opacity(0.55)).padding(11)
-                        }.buttonStyle(YOBROButtonStyle())
-                        Button { model.requestPrivateTab() } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "eyeglasses").font(.system(size: 14))
-                                Text(L("Privater Tab", "Private tab")).font(.system(size: 12))
-                                Spacer()
-                                Text("⇧ ⌘ T").font(.system(size: 10, design: .monospaced)).opacity(0.5)
-                            }.foregroundStyle(ink.opacity(0.55)).padding(11)
-                        }.buttonStyle(YOBROButtonStyle())
-                    }
-                    .padding(.top, 5)
-                    .contentShape(Rectangle())
-                    .onDrop(of: [UTType.plainText], delegate: SidebarBottomDropDelegate(model: model))
-                    }
-                    .background(SidebarScrollObserver(changed: {
-                        // The jump control is hidden while Mail is open. Updating
-                        // state for every clip-view pixel there needlessly
-                        // invalidates the WebKit-backed mail workspace.
-                        guard !model.showMail else { return }
-                        scrollRevision &+= 1
-                    }, connected: { model.sidebarScrollView = $0 }))
+                    .background(SidebarScrollObserver(changed: { scrollRevision &+= 1 }, connected: { model.sidebarScrollView = $0 }))
                 }
                 .scrollIndicators(.hidden)
                 .background(GeometryReader { geometry in
@@ -720,7 +788,7 @@ private struct SidebarTabList: View {
                 .onChange(of: model.activeID) { _, _ in revealActiveTab(using: proxy, animated: true) }
                 .onChange(of: model.space) { _, _ in revealActiveTab(using: proxy, animated: false) }
 
-                if !model.showMail, let direction = jumpDirection, model.draggingTabID == nil, model.draggingFolderID == nil {
+                if let direction = jumpDirection, model.draggingTabID == nil, model.draggingFolderID == nil {
                     VStack {
                         Spacer()
                         HStack {
@@ -730,20 +798,15 @@ private struct SidebarTabList: View {
                             }
                         }
                     }
-                    .padding(.trailing, 7).padding(.bottom, 7)
-                    .allowsHitTesting(model.draggingTabID == nil && model.draggingFolderID == nil)
+                    .padding(.trailing, 6).padding(.bottom, 6)
                 }
             }
         }
     }
 
-    private func sectionLabel(_ title: String) -> some View {
-        Text(title).font(.system(size: 9, weight: .semibold)).tracking(1.4).foregroundStyle(ink.opacity(0.4)).padding(.top, 23).padding(.bottom, 9).padding(.leading, 10)
-    }
-
     private var jumpDirection: SidebarJumpDirection? {
         _ = scrollRevision
-        guard !model.showMail, let id = model.activeID else { return nil }
+        guard let id = model.activeID, !(model.active?.pinned ?? false) else { return nil }
         if let direction = SidebarVisibility.jumpDirection(for: tabFrames[id], viewport: viewportFrame) { return direction }
         let ordered = presentedTabIDs
         let visibleIndices: [Int] = tabFrames.compactMap { entry -> Int? in
@@ -754,7 +817,7 @@ private struct SidebarTabList: View {
     }
 
     private var presentedTabIDs: [UUID] {
-        var result = model.visibleTabs.filter(\.pinned).map(\.id)
+        var result: [UUID] = []
         for folder in model.folders where folder.space == model.space {
             let tabs = model.visibleTabs.filter { !$0.pinned && $0.folderID == folder.id }
             if folder.collapsed {
@@ -763,7 +826,7 @@ private struct SidebarTabList: View {
                 result.append(contentsOf: tabs.map(\.id))
             }
         }
-        result.append(contentsOf: model.visibleTabs.filter { !$0.pinned && $0.folderID == nil }.map(\.id))
+        result.append(contentsOf: todayTabs.map(\.id))
         return result
     }
 
@@ -777,6 +840,208 @@ private struct SidebarTabList: View {
     }
 }
 
+/// The Space's name above its folders, with the Space menu on hover.
+private struct SpaceHeaderRow: View {
+    @ObservedObject var model: BrowserModel
+    let edit: (SidebarEditor) -> Void
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: model.spaceIcon(for: model.space).rawValue).font(.system(size: 11)).frame(width: 14)
+            Text(model.space).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: 4)
+            Menu {
+                SpaceMenuItems(model: model, space: model.space, edit: edit)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.button)
+            .buttonStyle(ChromeButtonStyle(size: 24))
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .opacity(hovering ? 1 : 0)
+            .yobroHelp(L("Space und Ordner verwalten", "Manage space and folders"))
+        }
+        .foregroundStyle(tone.muted)
+        .padding(.leading, 10).padding(.trailing, 6)
+        .frame(height: Chrome.rowHeight)
+        .chromeRow(selected: false, hovering: hovering)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .contextMenu { SpaceMenuItems(model: model, space: model.space, edit: edit) }
+    }
+}
+
+private struct SpaceMenuItems: View {
+    @ObservedObject var model: BrowserModel
+    let space: String
+    let edit: (SidebarEditor) -> Void
+
+    var body: some View {
+        Button(L("Space umbenennen …")) { edit(.renameSpace(space)) }
+        SpaceIconMenu(model: model, space: space)
+        Menu {
+            ForEach(SpaceTone.allCases) { tone in
+                Button { model.setSpaceTone(tone, for: space) } label: {
+                    Label { Text((model.spaceTone(for: space) == tone ? "✓  " : "") + tone.title) } icon: { Image(nsImage: tone.swatch) }
+                }
+            }
+        } label: { Label(L("Space-Farbe", "Space color"), systemImage: "paintpalette") }
+        Divider()
+        Button(L("Neuer Ordner …")) { edit(.newFolder) }
+        Button(L("Neuer Space …")) { edit(.newSpace) }
+    }
+}
+
+/// YAB's line between the kept tabs and today's tabs. "Clear" closes the
+/// latter; each one can still be reopened.
+private struct ClearTabsDivider: View {
+    let clear: () -> Void
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(tone.muted.opacity(0.18)).frame(height: 1)
+            Button(L("Leeren", "Clear"), action: clear)
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(tone.muted.opacity(0.8))
+                .opacity(hovering ? 1 : 0)
+                .yobroHelp(L("Alle Tabs unter dieser Linie schließen", "Close all tabs below this line"))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .padding(.bottom, 5)
+    }
+}
+
+private struct NewTabRow: View {
+    @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    var body: some View {
+        Button { model.openCommandBar(.newTab) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus").font(.system(size: 13)).frame(width: 16)
+                Text(L("Neuer Tab", "New tab")).font(.system(size: 13))
+                Spacer()
+            }
+            .foregroundStyle(tone.muted.opacity(0.75))
+            .padding(.leading, 10)
+            .frame(height: Chrome.rowHeight)
+            .chromeRow(selected: false, hovering: hovering)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .contextMenu { Button(L("Neuer privater Tab", "New private tab")) { model.requestPrivateTab() } }
+        .yobroHelp(L("Neuer Tab · ⌘T"))
+    }
+}
+
+private struct SidebarFooter: View {
+    @ObservedObject var model: BrowserModel
+    let edit: (SidebarEditor) -> Void
+    @Environment(\.spaceTone) private var tone
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Menu { LibraryMenuItems(model: model) } label: { Image(systemName: "square.grid.2x2") }
+                .menuStyle(.button).buttonStyle(ChromeButtonStyle(size: 26)).menuIndicator(.hidden).fixedSize()
+                .yobroHelp(L("Bibliothek und Einstellungen", "Library and settings"))
+                .accessibilityLabel(L("Bibliothek und Einstellungen", "Library and settings"))
+            Spacer(minLength: 2)
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(model.spaces, id: \.self) { space in SpaceButton(model: model, space: space, edit: edit) }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: 136)
+            Spacer(minLength: 2)
+            Button { model.showAgent.toggle() } label: {
+                Image(systemName: "sparkles")
+                    .overlay(alignment: .topTrailing) {
+                        if model.agentUsageActive { Circle().fill(brandOrange).frame(width: 6, height: 6).offset(x: 3, y: -2) }
+                    }
+            }
+            .buttonStyle(ChromeButtonStyle(size: 26))
+            .yobroHelp(model.showAgent ? L("Assistent schließen · ⇧⌘A", "Close assistant · ⇧⌘A") : L("Assistent öffnen · ⇧⌘A", "Open assistant · ⇧⌘A"))
+            .accessibilityIdentifier("agent-quick-access")
+            Menu {
+                Button(L("Neuer Space …")) { edit(.newSpace) }
+                Button(L("Neuer Ordner …")) { edit(.newFolder) }
+                Divider()
+                Button(L("Neuer privater Tab", "New private tab")) { model.requestPrivateTab() }
+            } label: { Image(systemName: "plus") }
+                .menuStyle(.button).buttonStyle(ChromeButtonStyle(size: 26)).menuIndicator(.hidden).fixedSize()
+                .yobroHelp(L("Neuer Space, Ordner oder privater Tab", "New space, folder or private tab"))
+        }
+        .frame(height: 26)
+    }
+}
+
+private struct SpaceButton: View {
+    @ObservedObject var model: BrowserModel
+    let space: String
+    let edit: (SidebarEditor) -> Void
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    private var active: Bool { space == model.space }
+
+    var body: some View {
+        Button { if !active { model.switchSpace(space) } } label: {
+            Image(systemName: model.spaceIcon(for: space).rawValue)
+                .font(.system(size: 12))
+                .foregroundStyle(tone.muted)
+                .frame(width: 34, height: 26)
+                .background(hovering && !active ? Chrome.hover : .clear, in: RoundedRectangle(cornerRadius: Chrome.radius))
+                .opacity(active ? 1 : hovering ? 0.8 : 0.45)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .contextMenu { SpaceMenuItems(model: model, space: space, edit: edit) }
+        .yobroHelp(space)
+        .accessibilityLabel(L("Space: ", "Space: ") + space)
+    }
+}
+
+private struct LibraryMenuItems: View {
+    @ObservedObject var model: BrowserModel
+
+    var body: some View {
+        Button(L("Verlauf", "History")) { model.librarySection = .history }
+        Button(L("Lesezeichen", "Bookmarks")) { model.librarySection = .bookmarks }
+        Button("Downloads") { model.librarySection = .downloads }
+        Divider()
+        if let profiles = model.profileSession {
+            Menu(L("Profil: ", "Profile: ") + profiles.active.name) {
+                ForEach(profiles.registry.profiles) { profile in
+                    Button {
+                        do { try profiles.switchTo(profile.id) } catch { model.notice = error.localizedDescription }
+                    } label: {
+                        Label(profile.name, systemImage: profile.id == profiles.active.id ? "checkmark" : profile.symbol)
+                    }
+                }
+                Divider()
+                Button(L("Neues Profil …", "New profile …")) { model.creatingProfile = true; model.showProfileEditor = true }
+                Button(L("Profil bearbeiten …", "Edit profile …")) { model.creatingProfile = false; model.showProfileEditor = true }
+            }
+        }
+        Button(L("Browserdaten importieren …", "Import browser data …")) { model.settingsSection = L("Daten importieren"); model.showSettings = true }
+        Button(L("Einstellungen …", "Settings …")) { model.settingsSection = L("Allgemein", "General"); model.showSettings = true }
+    }
+}
+
 private struct SidebarActiveTabJump: View {
     let direction: SidebarJumpDirection?
     let action: () -> Void
@@ -784,11 +1049,11 @@ private struct SidebarActiveTabJump: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: direction == .up ? "arrow.up" : direction == .down ? "arrow.down" : "arrow.up.and.down")
-            .font(.system(size: 11, weight: .bold))
+            .font(.system(size: 10, weight: .bold))
             .foregroundStyle(paper)
-            .frame(width: 30, height: 30)
-            .background(moss, in: Circle())
-            .shadow(color: .black.opacity(0.16), radius: 7, y: 3)
+            .frame(width: 26, height: 26)
+            .background(ink.opacity(0.85), in: Circle())
+            .shadow(color: .black.opacity(0.16), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
         .yobroHelp(L("Zum aktiven Tab springen", "Jump to active tab"))
@@ -819,34 +1084,32 @@ private struct ActiveDownloadStatus: View {
 
     var body: some View {
         if let current {
-            HStack(spacing: 11) {
+            HStack(spacing: 10) {
                 ZStack {
-                    Circle().stroke(moss.opacity(0.2), lineWidth: 3)
+                    Circle().stroke(.white.opacity(0.2), lineWidth: 2.5)
                     if current.expected > 0 {
-                        Circle().trim(from: 0, to: current.fraction).stroke(moss, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
+                        Circle().trim(from: 0, to: current.fraction).stroke(.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round)).rotationEffect(.degrees(-90))
                     } else {
-                        ProgressView().controlSize(.small).tint(moss)
+                        ProgressView().controlSize(.mini)
                     }
-                    Image(systemName: "arrow.down").font(.system(size: 9, weight: .bold)).foregroundStyle(moss)
-                }.frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(current.name).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    Image(systemName: "arrow.down").font(.system(size: 8, weight: .bold))
+                }.frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(current.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
                     HStack(spacing: 4) {
                         Text(progressLabel(current))
                         if downloads.activeCount > 1 {
                             Text("· " + String(format: L("+%d weitere", "+%d more"), downloads.activeCount - 1))
                         }
-                    }.font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
-                }.frame(width: 190, alignment: .leading)
-                Button { downloads.cancel(current.id) } label: { Image(systemName: "xmark").frame(width: 24, height: 24) }
+                    }.font(.system(size: 10)).opacity(0.65).lineLimit(1)
+                }.frame(width: 180, alignment: .leading)
+                Button { downloads.cancel(current.id) } label: { Image(systemName: "xmark").frame(width: 22, height: 22) }
                     .buttonStyle(.plain).yobroHelp(L("Download abbrechen"))
-                Button { model.librarySection = .downloads } label: { Image(systemName: "chevron.right").frame(width: 24, height: 24) }
+                Button { model.librarySection = .downloads } label: { Image(systemName: "chevron.right").frame(width: 22, height: 22) }
                     .buttonStyle(.plain).yobroHelp(L("Downloads öffnen", "Open downloads"))
             }
-            .padding(11)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(ink.opacity(0.1)))
-            .shadow(color: .black.opacity(0.15), radius: 14, y: 5)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .toastSurface()
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("active-download-status")
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -865,27 +1128,17 @@ private struct ClosedTabUndo: View {
     let undoID: UUID
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(ink.opacity(0.58))
+        HStack(spacing: 10) {
+            Image(systemName: "xmark.circle").font(.system(size: 15))
             Text(L("Tab geschlossen", "Tab closed"))
-                .font(.system(size: 12, weight: .medium))
             Button(L("Rückgängig", "Undo")) { model.reopenTab() }
                 .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(moss)
-                .padding(.horizontal, 9)
-                .frame(height: 28)
-                .background(moss.opacity(0.13), in: Capsule())
+                .font(.system(size: 12.5, weight: .semibold))
                 .accessibilityHint(L("Stellt den Tab in seinem ursprünglichen Space und Ordner wieder her.", "Restores the tab to its original space and folder."))
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 8)
-        .frame(height: 44)
-        .background(.regularMaterial, in: Capsule())
-        .overlay { Capsule().stroke(YOBROTheme.border.opacity(0.7), lineWidth: 1) }
-        .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
+        .padding(.leading, 12).padding(.trailing, 14)
+        .frame(height: 40)
+        .toastSurface()
         .appearanceTask(id: undoID) {
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             guard !Task.isCancelled else { return }
@@ -898,6 +1151,7 @@ struct TabRow: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject var model: BrowserModel
     var reorderGap: CGFloat = 5
+    @Environment(\.spaceTone) private var tone
     @State private var hover = false
     @State private var isRenaming = false
     @State private var renameText = ""
@@ -905,6 +1159,10 @@ struct TabRow: View {
     private var dropIntent: TabDropIntent? {
         model.tabDropFeedback?.targetID == tab.id ? model.tabDropFeedback?.intent : nil
     }
+    private var selected: Bool { tab.id == model.activeID }
+    /// Folder tabs close in two steps: first the page, then the entry.
+    private var closesPageOnly: Bool { tab.folderID != nil && selected && !tab.isSuspended }
+
     var body: some View {
         HStack(spacing: 0) {
             Button {
@@ -912,114 +1170,113 @@ struct TabRow: View {
                 model.select(tab.id)
             } label: {
                 HStack(spacing: 10) {
-                    Group {
-                        if tab.isNote { Image(systemName: "note.text").font(.system(size: 13)).foregroundStyle(moss) }
-                        else if tab.isPrivate { Image(systemName: "eyeglasses").font(.system(size: 13)).foregroundStyle(moss) }
-                        else if let icon = tab.favicon { Image(nsImage: icon).resizable().scaledToFit() }
-                        else { Image(systemName: tab.url.isEmpty ? "circle.dotted" : "globe").font(.system(size: 13)).foregroundStyle(moss) }
-                    }.frame(width: 17, height: 17)
-                    if model.splitPairs.contains(where: { $0.contains(tab.id) }) { Image(systemName: "rectangle.split.2x1").font(.system(size: 10)).foregroundStyle(moss) }
+                    TabFavicon(tab: tab)
+                    if model.splitPairs.contains(where: { $0.contains(tab.id) }) { Image(systemName: "rectangle.split.2x1").font(.system(size: 10)) }
                     if isRenaming {
                         TextField(L("Tabname", "Tab name"), text: $renameText)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 13))
                             .focused($renameIsFocused)
                             .onSubmit { finishRenaming() }
                             .onExitCommand { cancelRenaming() }
                     } else {
-                        Text(tab.sidebarTitle)
-                            .font(.system(size: 12, weight: tab.id == model.activeID ? .medium : .regular))
-                            .lineLimit(1)
+                        Text(tab.sidebarTitle).font(.system(size: 13)).lineLimit(1)
+                            .opacity(tab.isSuspended ? 0.7 : 1)
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.leading, 11)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.leading, 10)
+                .frame(maxWidth: .infinity, minHeight: Chrome.rowHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            Button { model.closeSidebarTab(tab.id) } label: {
-                ZStack {
-                    if tab.folderID != nil && !tab.isNote {
-                        Image(systemName: tab.id == model.activeID && !tab.isSuspended ? "minus" : "xmark")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(tab.id == model.activeID && !tab.isSuspended ? moss : ink.opacity(0.6))
-                    } else if hover {
-                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
-                    } else if tab.loading {
-                        ProgressView().controlSize(.mini).allowsHitTesting(false)
+            ZStack {
+                if hover || closesPageOnly {
+                    Button { model.closeSidebarTab(tab.id) } label: {
+                        Image(systemName: closesPageOnly ? "minus" : "xmark").font(.system(size: 10, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
-                }.frame(width: 36, height: 40).contentShape(Rectangle())
-            }.buttonStyle(YOBROButtonStyle(minimumSize: 36)).yobroHelp(tab.folderID != nil && !tab.isNote && tab.id == model.activeID && !tab.isSuspended
-                ? L("Seite schließen · Tab im Ordner behalten", "Close page · keep tab in folder")
-                : L("Tab löschen", "Delete tab"))
-        }.frame(height: 44)
-            .id(tab.id)
-            .background(GeometryReader { geometry in
-                Color.clear.preference(key: SidebarTabFrameKey.self, value: [tab.id: geometry.frame(in: .global)])
-            })
-            .background(tab.id == model.activeID ? YOBROTheme.surface.opacity(0.75) : hover ? YOBROTheme.surface.opacity(0.24) : .clear, in: RoundedRectangle(cornerRadius: 9))
-            // Keep the source clearly visible while its separate drag preview
-            // moves. Making the row nearly disappear looked like the drag had
-            // failed before it had even reached a drop target.
-            .opacity(model.draggingTabID == tab.id ? 0.82 : 1)
-            .animation(.easeOut(duration: 0.12), value: model.draggingTabID == tab.id)
-            .tabDropIndicator(dropIntent, gap: reorderGap)
-            .onHover { hover = $0 }
-            .onChange(of: renameIsFocused) { _, focused in
-                if !focused && isRenaming { finishRenaming() }
-            }
-            .onChange(of: model.activeID) { _, activeID in
-                if activeID != tab.id { cancelRenaming() }
-            }
-            .contentShape(Rectangle())
-            .onDrag {
-                model.beginSidebarTabDrag(tab.id)
-                return NSItemProvider(object: tab.id.uuidString as NSString)
-            } preview: {
-                HStack(spacing: 7) {
-                    Image(systemName: tab.isNote ? "note.text" : "globe")
-                    Text(tab.sidebarTitle).lineLimit(1)
+                    .buttonStyle(ChromeButtonStyle(size: 24))
+                    .yobroHelp(closesPageOnly ? L("Seite schließen · Tab im Ordner behalten", "Close page · keep tab in folder") : L("Tab löschen", "Delete tab"))
+                } else if tab.loading {
+                    ProgressView().controlSize(.mini).allowsHitTesting(false)
                 }
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(ink)
-                .padding(.horizontal, 10).frame(width: 190, height: 34, alignment: .leading)
-                .background(paper.opacity(0.94), in: RoundedRectangle(cornerRadius: 8))
             }
-            // The visual gap belongs to the preceding row's drop destination.
-            // Otherwise the exact space between tabs has no native drop target.
-            .padding(.bottom, reorderGap)
-            .contentShape(Rectangle())
-            .onDrop(of: [UTType.plainText], delegate: TabReorderDropDelegate(
-                targetID: tab.id, rowHeight: 44 + reorderGap, model: model
-            ))
-            .contextMenu {
-                Button(L("Tab umbenennen …", "Rename tab …")) { beginRenaming() }
-                if !tab.isPrivate { Button(tab.pinned ? L("Loslösen") : L("Anpinnen")) { tab.pinned.toggle(); model.save() } }
-                Menu(L("In Space verschieben")) {
-                    ForEach(model.spaces.filter { $0 != tab.space }, id: \.self) { space in Button(space) { model.moveToSpace(tab.id, space: space) } }
+            .frame(width: 30)
+        }
+        .frame(height: Chrome.rowHeight)
+        .foregroundStyle(selected ? ink : tone.muted)
+        .background(alignment: .leading) {
+            // YAB shows loading as a soft fill sweeping across the row.
+            if tab.loading {
+                GeometryReader { geometry in
+                    RoundedRectangle(cornerRadius: Chrome.radius)
+                        .fill(ink.opacity(0.055))
+                        .frame(width: geometry.size.width * max(0.08, tab.progress))
                 }
-                if !tab.isPrivate { Menu(L("In Ordner verschieben")) {
-                    Button(L("Ohne Ordner")) { model.moveToFolder(tab.id, folder: nil) }
-                    ForEach(model.folders.filter { $0.space == tab.space }) { folder in Button(folder.name) { model.moveToFolder(tab.id, folder: folder.id) } }
-                } }
-                if model.splitPairs.contains(where: { $0.contains(tab.id) }) { Button(L("Splitview trennen")) { model.separateSplit(tab.id) } }
-                Button(tab.folderID != nil && tab.id == model.activeID && !tab.isSuspended
-                    ? L("Seite schließen · im Ordner behalten", "Close page · keep in folder")
-                    : L("Tab löschen", "Delete tab")) { model.closeSidebarTab(tab.id) }
-                if tab.isNote {
-                    Button(L("Notiz duplizieren", "Duplicate note")) {
-                        let copy = model.newNote(title: tab.title, space: tab.space, folderID: tab.folderID)
-                        copy.noteContent = tab.noteContent; copy.noteRTF = tab.noteRTF; model.save()
-                    }
-                } else {
-                    Button(L("Tab duplizieren")) { model.newTab(url: tab.url, space: tab.space, isPrivate: tab.isPrivate) }
-                }
-                Button(L("Geschlossenen Tab wieder öffnen")) { model.reopenTab() }.disabled(model.closedTabs.isEmpty)
+                .allowsHitTesting(false)
             }
-            .yobroHelp(tab.sidebarHelp, placement: .trailing)
-            .accessibilityLabel(tab.sidebarTitle)
+        }
+        .chromeRow(selected: selected, hovering: hover)
+        .id(tab.id)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: SidebarTabFrameKey.self, value: [tab.id: geometry.frame(in: .global)])
+        })
+        // Keep the source clearly visible while its separate drag preview
+        // moves. Making the row nearly disappear looked like the drag had
+        // failed before it had even reached a drop target.
+        .opacity(model.draggingTabID == tab.id ? 0.82 : 1)
+        .animation(.easeOut(duration: 0.12), value: model.draggingTabID == tab.id)
+        .tabDropIndicator(dropIntent, gap: reorderGap)
+        .onHover { hover = $0 }
+        .onChange(of: renameIsFocused) { _, focused in
+            if !focused && isRenaming { finishRenaming() }
+        }
+        .onChange(of: model.activeID) { _, activeID in
+            if activeID != tab.id { cancelRenaming() }
+        }
+        .contentShape(Rectangle())
+        .onDrag {
+            model.beginSidebarTabDrag(tab.id)
+            return NSItemProvider(object: tab.id.uuidString as NSString)
+        } preview: {
+            HStack(spacing: 7) {
+                Image(systemName: "globe")
+                Text(tab.sidebarTitle).lineLimit(1)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(ink)
+            .padding(.horizontal, 10).frame(width: 200, height: 34, alignment: .leading)
+            .background(paper.opacity(0.95), in: RoundedRectangle(cornerRadius: Chrome.radius))
+        }
+        // The visual gap belongs to the preceding row's drop destination.
+        // Otherwise the exact space between tabs has no native drop target.
+        .padding(.bottom, reorderGap)
+        .contentShape(Rectangle())
+        .onDrop(of: [UTType.plainText], delegate: TabReorderDropDelegate(
+            targetID: tab.id, rowHeight: Chrome.rowHeight + reorderGap, model: model
+        ))
+        .contextMenu {
+            Button(L("Tab umbenennen …", "Rename tab …")) { beginRenaming() }
+            if !tab.isPrivate { Button(tab.pinned ? L("Loslösen") : L("Anpinnen")) { tab.pinned.toggle(); model.save() } }
+            Menu(L("In Space verschieben")) {
+                ForEach(model.spaces.filter { $0 != tab.space }, id: \.self) { space in Button(space) { model.moveToSpace(tab.id, space: space) } }
+            }
+            if !tab.isPrivate { Menu(L("In Ordner verschieben")) {
+                Button(L("Ohne Ordner")) { model.moveToFolder(tab.id, folder: nil) }
+                ForEach(model.folders.filter { $0.space == tab.space }) { folder in Button(folder.name) { model.moveToFolder(tab.id, folder: folder.id) } }
+            } }
+            if model.splitPairs.contains(where: { $0.contains(tab.id) }) { Button(L("Splitview trennen")) { model.separateSplit(tab.id) } }
+            Button(closesPageOnly
+                ? L("Seite schließen · im Ordner behalten", "Close page · keep in folder")
+                : L("Tab löschen", "Delete tab")) { model.closeSidebarTab(tab.id) }
+            Button(L("Tab duplizieren")) { model.newTab(url: tab.url, space: tab.space, isPrivate: tab.isPrivate) }
+            Button(L("Geschlossenen Tab wieder öffnen")) { model.reopenTab() }.disabled(model.closedTabs.isEmpty)
+        }
+        .yobroHelp(tab.sidebarHelp, placement: .trailing)
+        .accessibilityLabel(tab.sidebarTitle)
     }
 
     private func beginRenaming() {
@@ -1071,18 +1328,18 @@ private struct TabDropIndicatorModifier: ViewModifier {
             .overlay {
                 if intent == .split {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 9)
-                            .fill(moss.opacity(0.18))
-                            .overlay { RoundedRectangle(cornerRadius: 9).stroke(moss, lineWidth: 2) }
+                        RoundedRectangle(cornerRadius: Chrome.radius)
+                            .fill(ink.opacity(0.08))
+                            .overlay { RoundedRectangle(cornerRadius: Chrome.radius).stroke(ink.opacity(0.55), lineWidth: 1.5) }
                         HStack(spacing: 5) {
                             Image(systemName: "rectangle.split.2x1")
                             if !compact { Text(L("Split Screen", "Split screen")) }
                         }
-                        .font(.system(size: compact ? 12 : 10, weight: .bold))
-                        .foregroundStyle(moss)
+                        .font(.system(size: compact ? 12 : 10, weight: .semibold))
+                        .foregroundStyle(ink)
                         .padding(.horizontal, compact ? 0 : 7)
                         .frame(height: 22)
-                        .background(YOBROTheme.chromeTop.opacity(0.94), in: Capsule())
+                        .background(paper.opacity(0.94), in: Capsule())
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
                     .allowsHitTesting(false)
@@ -1099,10 +1356,9 @@ private struct TabDropIndicatorModifier: ViewModifier {
 
     private var insertionLine: some View {
         Capsule()
-            .fill(moss)
-            .frame(height: 3)
+            .fill(ink.opacity(0.7))
+            .frame(height: 2.5)
             .padding(.horizontal, compact ? 2 : 4)
-            .shadow(color: moss.opacity(0.35), radius: 2)
             .transition(.opacity)
             .allowsHitTesting(false)
     }
@@ -1272,221 +1528,6 @@ struct SidebarBottomDropDelegate: DropDelegate {
     }
 }
 
-private struct SidebarHistoryControls: View {
-    @ObservedObject var tab: BrowserTab
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button { tab.webView.goBack() } label: { Image(systemName: "chevron.left").frame(width: 32, height: 32) }
-                .disabled(!tab.canGoBack).yobroHelp(L("Zurück"))
-            Button { tab.webView.goForward() } label: { Image(systemName: "chevron.right").frame(width: 32, height: 32) }
-                .disabled(!tab.canGoForward).yobroHelp(L("Vorwärts"))
-            Button { if tab.loading { tab.webView.stopLoading() } else { tab.webView.reload() } } label: {
-                Image(systemName: tab.loading ? "xmark" : "arrow.clockwise").frame(width: 32, height: 32)
-            }.disabled(tab.url.isEmpty).yobroHelp(tab.loading ? L("Laden stoppen", "Stop loading") : L("Neu laden"))
-        }
-        .buttonStyle(YOBROButtonStyle(minimumSize: 32))
-        .font(.system(size: 12)).foregroundStyle(ink.opacity(0.65))
-    }
-}
-
-private struct EmptySidebarHistoryControls: View {
-    var body: some View {
-        HStack(spacing: 0) {
-            Image(systemName: "chevron.left").frame(width: 32, height: 32)
-            Image(systemName: "chevron.right").frame(width: 32, height: 32)
-            Image(systemName: "arrow.clockwise").frame(width: 32, height: 32)
-        }
-        .font(.system(size: 12))
-        .foregroundStyle(ink.opacity(0.22))
-        .accessibilityHidden(true)
-    }
-}
-
-private struct EmptySidebarNavigation: View {
-    @ObservedObject var model: BrowserModel
-    var opensNewTab = false
-    @StateObject private var emptyLogin = LoginAutofill()
-    @State private var showingActions = false
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button {
-                if opensNewTab { model.requestNewTab() }
-                model.focusAddress = true
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10)).foregroundStyle(moss)
-                    Text(L("Suchen oder URL eingeben"))
-                        .lineLimit(1).font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(ink.opacity(0.75))
-                    Spacer(minLength: 0)
-                }
-                .padding(.leading, 16)
-                .frame(maxWidth: .infinity, minHeight: 40)
-                .contentShape(Rectangle())
-            }
-            .yobroHelp(L("Adresse öffnen · ⌘L"))
-            .accessibilityLabel(L("Adresse öffnen · ⌘L"))
-            LoginAutofillButton(login: emptyLogin)
-            ManagedVPNButton(model: model)
-            Button { showingActions.toggle() } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 16))
-                    .frame(width: 40, height: 40)
-                    .background(ink.opacity(showingActions ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9))
-            }
-            .yobroHelp(L("Kontrollzentrum", "Control Center"))
-            .accessibilityLabel(L("Kontrollzentrum", "Control Center"))
-            .popover(isPresented: $showingActions, arrowEdge: .top) {
-                SidebarPageActions(model: model, tab: nil, store: model.extensions) { showingActions = false }
-            }
-        }
-        .buttonStyle(YOBROButtonStyle())
-        .background(YOBROTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ink.opacity(0.05)))
-    }
-}
-
-struct SidebarNavigation: View {
-    @ObservedObject var model: BrowserModel
-    @ObservedObject var tab: BrowserTab
-    var compact = false
-    @State private var editingAddress = false
-    @State private var showingActions = false
-
-    var body: some View {
-        addressBar
-        .buttonStyle(YOBROButtonStyle()).font(.system(size: 12))
-        .appearanceTask(id: tab.id) {
-            editingAddress = false
-            showingActions = false
-            presentRequestedAddress()
-        }
-        .onChange(of: model.showOnboarding) { _, value in if value { editingAddress = false; showingActions = false } }
-        .onChange(of: model.focusAddress) { _, _ in presentRequestedAddress() }
-    }
-
-    private var addressBar: some View {
-        Group {
-            if compact {
-                VStack(spacing: 4) { addressButton; if !tab.isPrivate { LoginAutofillButton(login: tab.logins) }; ManagedVPNButton(model: model, compact: true); actionsButton }
-            } else {
-                HStack(spacing: 0) { addressButton.padding(.leading, 4); if !tab.isPrivate { LoginAutofillButton(login: tab.logins) }; PageToolsButton(tab: tab); ManagedVPNButton(model: model); actionsButton.padding(4) }
-            }
-        }
-        .background(YOBROTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ink.opacity(0.05)))
-    }
-
-    private var addressButton: some View {
-        Button { editingAddress = true } label: {
-            HStack(spacing: 7) {
-                Image(systemName: tab.isPrivate ? "eyeglasses" : (tab.url.isEmpty ? "magnifyingglass" : (tab.url.hasPrefix("https://") ? "lock" : "globe")))
-                    .font(.system(size: compact ? 16 : 10)).foregroundStyle(moss)
-                if !compact {
-                    Text(tab.isPrivate && tab.url.isEmpty ? L("Privat suchen oder URL eingeben", "Search privately or enter URL") : (tab.url.isEmpty ? L("Suchen oder URL eingeben") : (URL(string: tab.url)?.host ?? tab.title)))
-                        .lineLimit(1).truncationMode(.tail).font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(ink.opacity(0.75))
-                    Spacer(minLength: 0)
-                }
-            }.padding(.leading, compact ? 0 : 12)
-                .frame(maxWidth: compact ? 42 : .infinity, minHeight: 40)
-                .contentShape(Rectangle())
-        }
-        .yobroHelp(tab.url.isEmpty ? L("Adresse öffnen · ⌘L") : tab.url + " · ⌘L")
-        .accessibilityLabel(L("Adresse öffnen · ⌘L"))
-        .popover(isPresented: $editingAddress, arrowEdge: .leading) {
-            AddressEntry(model: model, tab: tab) { editingAddress = false }
-        }
-    }
-
-    private var actionsButton: some View {
-        Button { showingActions.toggle() } label: {
-            Image(systemName: "slider.horizontal.3").font(.system(size: 16))
-                .frame(width: 40, height: 40)
-                .background(ink.opacity(showingActions ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9))
-        }
-        .yobroHelp(L("Kontrollzentrum", "Control Center"))
-        .accessibilityLabel(L("Kontrollzentrum", "Control Center"))
-        .popover(isPresented: $showingActions, arrowEdge: compact ? .leading : .top) {
-            SidebarPageActions(model: model, tab: tab, store: model.extensions) { showingActions = false }
-        }
-    }
-
-    private func presentRequestedAddress() {
-        guard model.focusAddress, !model.showOnboarding else { return }
-        showingActions = false
-        editingAddress = true
-        model.focusAddress = false
-    }
-}
-
-private struct ManagedVPNButton: View {
-    @ObservedObject var model: BrowserModel
-    @ObservedObject private var vpn: ManagedVPNStore
-    var compact = false
-    @State private var presented = false
-
-    init(model: BrowserModel, compact: Bool = false) {
-        self.model = model
-        self.compact = compact
-        vpn = model.managedVPN
-    }
-
-    var body: some View {
-        Button { presented.toggle() } label: {
-            ZStack(alignment: .bottomTrailing) {
-                Image(systemName: vpn.isConnected ? "shield.checkered" : "shield")
-                    .font(.system(size: 15)).foregroundStyle(vpn.isConnected ? moss : ink.opacity(0.55))
-                    .frame(width: 38, height: 40)
-                if vpn.isConnected { Circle().fill(Color.green).frame(width: 7, height: 7).overlay(Circle().stroke(paper, lineWidth: 1.5)).offset(x: -4, y: -5) }
-            }
-        }
-        .yobroHelp(vpn.connectedLocation.map { L("VPN: \($0.city)", "VPN: \($0.city)") } ?? L("VPN-Standort wählen", "Choose VPN location"))
-        .accessibilityLabel(vpn.connectedLocation.map { L("VPN verbunden: \($0.city)", "VPN connected: \($0.city)") } ?? L("VPN-Standort wählen", "Choose VPN location"))
-        .popover(isPresented: $presented, arrowEdge: compact ? .leading : .top) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L("VPN & Proxy", "VPN & proxy")).font(.headline)
-                Text(L("Eigener YoBro-Proxy", "Your YoBro proxy")).font(.caption).foregroundStyle(.secondary)
-                locationButton(nil)
-                ForEach(vpn.locations) { location in locationButton(location) }
-                if case .connecting = vpn.status {
-                    HStack { ProgressView().controlSize(.small); Text(L("Verbinden …", "Connecting …")) }.font(.caption).foregroundStyle(.secondary)
-                }
-            }.padding(14).frame(width: 260).background(paper)
-        }
-    }
-
-    private func locationButton(_ location: ManagedVPNLocation?) -> some View {
-        let selected = location?.id == vpn.selectedLocationID || (location == nil && vpn.selectedLocationID == nil)
-        return Button {
-            if let location {
-                Task {
-                    do { try await vpn.connect(location, to: model.websiteDataStore); model.active?.webView.reload(); presented = false }
-                    catch { model.notice = error.localizedDescription }
-                }
-            } else {
-                vpn.disconnect(from: model.websiteDataStore)
-                model.updateActiveProxy()
-                model.active?.webView.reload()
-                presented = false
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Text(location?.flag ?? "○").font(.system(size: 19)).frame(width: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(location?.title ?? L("YoBro-Proxy aus", "YoBro proxy off")).font(.system(size: 12, weight: .semibold))
-                    Text(location?.subtitle ?? L("System-VPN separat prüfen", "Check system VPN separately")).font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if selected { Image(systemName: "checkmark").foregroundStyle(moss) }
-            }.padding(8).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(vpn.status == .connecting)
-    }
-}
-
 private struct SidebarPageActions: View {
     @ObservedObject var model: BrowserModel
     let tab: BrowserTab?
@@ -1494,21 +1535,16 @@ private struct SidebarPageActions: View {
     let close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(L("Kontrollzentrum", "Control Center")).font(.system(size: 15, weight: .semibold))
-            if let tab {
-                SidebarTabActions(model: model, tab: tab, close: close)
-            } else {
-                SidebarActionGrid(model: model, tab: nil, close: close)
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            SidebarActionGrid(model: model, tab: tab, close: close)
             Divider()
-            Text(L("Erweiterungen")).font(.system(size: 15, weight: .semibold))
+            Text(L("Erweiterungen")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
             ForEach(store.entries.filter { $0.enabled && store.errors[$0.id] == nil }) { entry in
-                    Button { close(); store.perform(entry, tab: tab) } label: {
-                        Label(entry.name, systemImage: "puzzlepiece.extension")
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
-                    }.disabled(tab == nil)
-                }
+                Button { close(); store.perform(entry, tab: tab) } label: {
+                    Label(entry.name, systemImage: "puzzlepiece.extension")
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+                }.disabled(tab == nil)
+            }
             if let tab {
                 MarketplaceInstallButton(model: model, tab: tab, store: store)
             }
@@ -1528,29 +1564,9 @@ private struct SidebarPageActions: View {
                 Text(L("Webseiten-Darkmode")).font(.system(size: 12))
                 Spacer()
             }
-            Button {
-                close()
-                model.settingsSection = L("Allgemein", "General")
-                model.showSettings = true
-            } label: {
-                Label(L("Einstellungen", "Settings"), systemImage: "gearshape")
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .yobroHelp(L("Einstellungen", "Settings"))
         }
         .buttonStyle(YOBROButtonStyle()).font(.system(size: 12))
-        .padding(16).frame(width: 300).background(paper).foregroundStyle(ink)
-    }
-}
-
-private struct SidebarTabActions: View {
-    @ObservedObject var model: BrowserModel
-    @ObservedObject var tab: BrowserTab
-    let close: () -> Void
-
-    var body: some View {
-        SidebarActionGrid(model: model, tab: tab, close: close)
+        .padding(16).frame(width: 290).background(paper).foregroundStyle(ink)
     }
 }
 
@@ -1561,251 +1577,91 @@ private struct SidebarActionGrid: View {
     private var hasPage: Bool { !(tab?.url.isEmpty ?? true) }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 8) {
             HStack(spacing: 8) {
-                action("plus", L("Neuer Tab · ⌘T")) { model.requestNewTab() }
                 action(tab?.pinned == true ? "pin.fill" : "pin", tab?.pinned == true ? L("Loslösen") : L("Anpinnen")) { tab?.pinned.toggle(); model.save() }.disabled(tab == nil)
                 action(model.splitID == nil ? "rectangle.split.2x1" : "rectangle", L("Splitview · ⇧⌘S")) { model.toggleSplit() }.disabled(tab == nil)
-                action("sparkle", L("Agenten · ⇧⌘A")) { model.showAgent.toggle() }
-            }
-            HStack(spacing: 8) {
-                action("chevron.left", L("Zurück")) { tab?.webView.goBack() }.disabled(tab?.canGoBack != true)
-                action("chevron.right", L("Vorwärts")) { tab?.webView.goForward() }.disabled(tab?.canGoForward != true)
-                action(tab?.loading == true ? "xmark" : "arrow.clockwise", tab?.loading == true ? L("Laden stoppen", "Stop loading") : L("Neu laden")) {
-                    if tab?.loading == true { tab?.webView.stopLoading() } else { tab?.webView.reload() }
-                }.disabled(!hasPage)
-                action("link", L("Adresse kopieren")) {
-                    guard let tab else { return }
-                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(tab.url, forType: .string)
-                }.disabled(!hasPage)
-            }
-            HStack(spacing: 8) {
                 action(model.activePageIsBookmarked ? "bookmark.fill" : "bookmark", L("Seite merken · ⌘D", "Bookmark page · ⌘D")) {
                     model.bookmarkActivePage()
                 }.disabled(!hasPage)
-                action("minus.magnifyingglass", L("Seite verkleinern · ⌘-", "Zoom out · ⌘-")) { tab?.changeZoom(-1) }.disabled(!hasPage)
-                action("plus.magnifyingglass", L("Seite vergrößern · ⌘+", "Zoom in · ⌘+")) { tab?.changeZoom(1) }.disabled(!hasPage)
                 action("printer", L("Seite drucken · ⌘P", "Print page · ⌘P")) { tab?.printPage() }.disabled(!hasPage)
             }
-
+            HStack(spacing: 8) {
+                action("minus.magnifyingglass", L("Seite verkleinern · ⌘-", "Zoom out · ⌘-")) { tab?.changeZoom(-1) }.disabled(!hasPage)
+                action("plus.magnifyingglass", L("Seite vergrößern · ⌘+", "Zoom in · ⌘+")) { tab?.changeZoom(1) }.disabled(!hasPage)
+                action("text.magnifyingglass", L("Auf Seite suchen · ⌘F", "Find on page · ⌘F")) { tab?.showFind = true }.disabled(!hasPage)
+                action("gearshape", L("Einstellungen", "Settings")) {
+                    model.settingsSection = L("Allgemein", "General")
+                    model.showSettings = true
+                }
+            }
         }
     }
 
     private func action(_ symbol: String, _ title: String, perform: @escaping () -> Void) -> some View {
         Button { close(); perform() } label: {
-            Image(systemName: symbol).font(.system(size: 18)).frame(maxWidth: .infinity).frame(height: 44)
-                .background(ink.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: symbol).font(.system(size: 16)).frame(maxWidth: .infinity).frame(height: 40)
+                .background(ink.opacity(0.05), in: RoundedRectangle(cornerRadius: Chrome.radius))
         }
         .yobroHelp(title)
         .accessibilityLabel(title)
     }
 }
 
-struct AddressEntry: View {
+// MARK: - Pages
+
+/// Shown when no tab is selected.
+private struct StartPage: View {
     @ObservedObject var model: BrowserModel
-    @ObservedObject var tab: BrowserTab
-    let close: () -> Void
-    @State private var address = ""
-    /// `nil` means "use exactly what was typed". Preselecting a history entry
-    /// would silently redirect a freshly entered address to an older URL.
-    @State private var selectedSuggestion: Int?
-    @FocusState private var focused: Bool
-    private var suggestions: [HistoryEntry] { model.addressSuggestions(address) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L("Suchen oder URL eingeben")).font(.system(size: 12)).foregroundStyle(.secondary)
-            TextField(L("Wohin möchtest du?"), text: $address).textFieldStyle(YOBROTextFieldStyle()).font(.system(size: 17)).focused($focused)
-                .onSubmit { openSelectedSuggestion() }
-            if !suggestions.isEmpty {
-                VStack(spacing: 2) {
-                    ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                        Button {
-                            selectedSuggestion = index
-                            openSelectedSuggestion()
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "clock.arrow.circlepath").foregroundStyle(moss).frame(width: 18)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(suggestion.title).lineLimit(1).foregroundStyle(ink)
-                                    Text(suggestion.url).lineLimit(1).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text("\(suggestion.visits)×").font(.system(size: 10)).foregroundStyle(.tertiary)
-                                if index == selectedSuggestion { Image(systemName: "return").font(.system(size: 11)).foregroundStyle(moss) }
-                            }.padding(.horizontal, 8).frame(height: 42).contentShape(Rectangle())
-                                .background(index == selectedSuggestion ? moss.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                        }.buttonStyle(.plain)
-                    }
+        VStack(spacing: 14) {
+            YOBROMark(size: 44).opacity(0.85)
+            Text(L("Wohin als Nächstes?", "Where to next?")).font(.system(size: 17, weight: .medium))
+            Button { model.openCommandBar(.newTab) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text(L("Suchen oder Adresse eingeben", "Search or enter address"))
+                    Spacer(minLength: 24)
+                    Text("⌘T").font(.system(size: 11, design: .monospaced)).opacity(0.5)
                 }
+                .font(.system(size: 13))
+                .foregroundStyle(ink.opacity(0.6))
+                .padding(.horizontal, 14).frame(width: 340, height: 40)
+                .background(YOBROTheme.field, in: RoundedRectangle(cornerRadius: 12))
             }
-            HStack {
-                if !tab.url.isEmpty { Button(L("Adresse kopieren")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(tab.url, forType: .string) } }
-                Spacer()
-                Button(L("Schließen"), action: close).keyboardShortcut(.cancelAction)
-                Button(L("Öffnen")) { openSelectedSuggestion() }.keyboardShortcut(.defaultAction).disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }.font(.system(size: 12))
-        }.padding(20).frame(width: 500).background(paper)
-            .appearanceTask(id: tab.id) {
-                address = tab.url
-                focused = false
-                await Task.yield()
-                focused = true
-                await Task.yield()
-                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-            }
-            .onChange(of: address) { _, _ in selectedSuggestion = nil }
-            .onKeyPress(.downArrow) {
-                guard !suggestions.isEmpty else { return .ignored }
-                selectedSuggestion = SuggestionSelection.next(selectedSuggestion, count: suggestions.count)
-                return .handled
-            }
-            .onKeyPress(.upArrow) {
-                guard !suggestions.isEmpty else { return .ignored }
-                selectedSuggestion = SuggestionSelection.previous(selectedSuggestion)
-                return .handled
-            }
-    }
-    private func openSelectedSuggestion() {
-        model.navigate(SuggestionSelection.destination(selectedSuggestion, suggestions: suggestions, typed: address))
-        close()
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(paper)
+        .accessibilityIdentifier("new-tab-page")
     }
 }
 
+/// A tab that has no page yet asks where to go, inline.
 struct NewTabPage: View {
-    let tab: BrowserTab?
+    @ObservedObject var tab: BrowserTab
     @ObservedObject var model: BrowserModel
-    @State private var address = ""
-    /// See `AddressEntry`: no suggestion is preselected so Enter opens the
-    /// typed address rather than the highest scoring history entry.
-    @State private var selectedSuggestion: Int?
-    @FocusState private var focused: Bool
-    private var suggestions: [HistoryEntry] { model.addressSuggestions(address) }
 
     var body: some View {
-        GeometryReader { geometry in
-        let cardWidth = min(tab?.isPrivate == true ? 540 : 820, max(220, geometry.size.width - 32))
-        let compact = geometry.size.width < 620 || geometry.size.height < 620
-        ScrollView(.vertical) {
-        VStack(spacing: compact ? 12 : 16) {
-            if tab?.isPrivate == true {
-                Spacer()
-                VStack(spacing: compact ? 6 : 10) {
-                    Image(systemName: "eyeglasses")
-                        .font(.system(size: compact ? 38 : 58, weight: .light))
-                        .foregroundStyle(moss)
-                    Text(L("Privates Browsen", "Private browsing"))
-                        .font(.system(size: compact ? 30 : 42, weight: .semibold, design: .rounded))
-                        .tracking(-2)
+        VStack(spacing: 18) {
+            if tab.isPrivate {
+                VStack(spacing: 8) {
+                    Image(systemName: "eyeglasses").font(.system(size: 34, weight: .light))
+                    Text(L("Privates Browsen", "Private browsing")).font(.system(size: 22, weight: .semibold))
                     Text(L("Cookies und Websitedaten bleiben nur bis zum Schließen des Tabs. Verlauf und Sitzung werden nicht gespeichert.", "Cookies and website data last only until you close the tab. History and session are not saved."))
-                        .font(.system(size: 13)).foregroundStyle(ink.opacity(0.5))
-                        .multilineTextAlignment(.center).frame(maxWidth: 520)
-                }
-            } else {
-                HStack(spacing: 10) {
-                    YOBROMark(size: 34)
-                    Text("YoBro").font(.system(size: 21, weight: .semibold, design: .rounded))
-                    Text(L("Dashboard", "Dashboard")).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(model.space).font(.system(size: 10, weight: .medium)).foregroundStyle(moss)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(moss.opacity(0.09), in: Capsule())
-                }
-                .frame(width: cardWidth)
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: tab?.isPrivate == true ? "eyeglasses" : "magnifyingglass").foregroundStyle(moss)
-                    TextField(tab?.isPrivate == true ? L("Privat suchen oder URL eingeben", "Search privately or enter URL") : L("Suchen oder URL eingeben"), text: $address)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 16))
-                        .focused($focused)
-                        .onSubmit { openSelectedSuggestion() }
-                }
-                .padding(.horizontal, 14).frame(height: 48)
-                .background(YOBROTheme.field, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(moss.opacity(focused ? 0.5 : 0.16), lineWidth: focused ? 1.5 : 1))
-
-                if !suggestions.isEmpty {
-                    VStack(spacing: 2) {
-                        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                            Button {
-                                selectedSuggestion = index
-                                openSelectedSuggestion()
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(moss).frame(width: 18)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(suggestion.title).lineLimit(1).foregroundStyle(ink)
-                                        Text(suggestion.url).lineLimit(1).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text("\(suggestion.visits)×").font(.system(size: 10)).foregroundStyle(.tertiary)
-                                    if index == selectedSuggestion { Image(systemName: "return").font(.system(size: 11)).foregroundStyle(moss) }
-                                }
-                                .padding(.horizontal, 8).frame(height: 42).contentShape(Rectangle())
-                                .background(index == selectedSuggestion ? moss.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                            }.buttonStyle(.plain)
-                        }
-                    }
-                }
-                if tab?.isPrivate == true {
-                    Text(L("Adresse eingeben oder direkt im Web suchen · Enter zum Öffnen", "Enter an address or search the web · Press Enter to open"))
-                        .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 4)
+                        .font(.system(size: 12)).foregroundStyle(ink.opacity(0.55))
+                        .multilineTextAlignment(.center).frame(maxWidth: 460)
                 }
             }
-            .padding(tab?.isPrivate == true ? 16 : 10)
-            .frame(width: cardWidth)
-            .background(YOBROTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(YOBROTheme.border.opacity(0.45)))
-            .shadow(color: .black.opacity(0.10), radius: 24, y: 10)
-            .appearanceTask(id: tab?.id) { await Task.yield(); focused = true }
-            .onChange(of: model.focusAddress) { _, requested in
-                guard requested else { return }
-                focused = true
-                model.focusAddress = false
+            if tab.id == model.activeID {
+                CommandBar(model: model, mode: .current, inline: true)
             }
-            .onChange(of: address) { _, _ in selectedSuggestion = nil }
-            .onKeyPress(.downArrow) {
-                guard !suggestions.isEmpty else { return .ignored }
-                selectedSuggestion = SuggestionSelection.next(selectedSuggestion, count: suggestions.count)
-                return .handled
-            }
-            .onKeyPress(.upArrow) {
-                guard !suggestions.isEmpty else { return .ignored }
-                selectedSuggestion = SuggestionSelection.previous(selectedSuggestion)
-                return .handled
-            }
-            if tab?.isPrivate != true {
-                BroDashboard(model: model, chat: model.chat, mail: model.mail, workspaces: model.workspaces, voice: model.voice)
-                    .padding(.horizontal, 16)
-            }
-            // Balance the flexible space above and below the start content.
-            // The previous fixed bottom inset pushed the whole composition too
-            // far down, especially after closing a tab into this empty state.
-            Spacer()
         }
-        .padding(.top, tab?.isPrivate == true ? 0 : 28)
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: geometry.size.height)
-        }
-        .scrollIndicators(.hidden)
+        .padding(.top, tab.isPrivate ? 0 : 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RadialGradient(colors: [moss.opacity(0.08), .clear], center: .center, startRadius: 20, endRadius: 420)
-        )
+        .background(paper)
         .accessibilityIdentifier("new-tab-page")
-        }
-    }
-
-    private func openSelectedSuggestion() {
-        let destination = SuggestionSelection.destination(selectedSuggestion, suggestions: suggestions, typed: address)
-        guard !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        if let tab {
-            do { try tab.navigate(destination) }
-            catch { model.notice = error.localizedDescription }
-        } else {
-            model.newTab(url: destination)
-        }
     }
 }
 
@@ -1814,9 +1670,7 @@ struct TabContent: View {
     @ObservedObject var model: BrowserModel
     var body: some View {
         ZStack(alignment: .top) {
-            if tab.isNote {
-                NoteEditor(tab: tab, model: model)
-            } else if tab.isExtensionsHub {
+            if tab.isExtensionsHub {
                 ExtensionHubPage(model: model)
             } else if tab.url.isEmpty {
                 NewTabPage(tab: tab, model: model)
@@ -1824,70 +1678,28 @@ struct TabContent: View {
                 paper
                 WebSurface(webView: tab.webView)
                 if let failure = tab.failure {
-                    VStack(spacing: 17) {
-                        Image(systemName: failure.symbol).font(.system(size: 32)).foregroundStyle(moss)
-                        Text(failure.title).font(.system(size: 20, weight: .medium)).multilineTextAlignment(.center)
+                    VStack(spacing: 14) {
+                        Image(systemName: failure.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(ink.opacity(0.6))
+                        Text(failure.title).font(.system(size: 18, weight: .medium)).multilineTextAlignment(.center)
                         Text(failure.detail).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         HStack(spacing: 10) {
                             if failure.canRetry {
                                 Button(L("Erneut versuchen")) { tab.failure = nil; tab.webView.reload() }
-                                    .buttonStyle(.borderedProminent).tint(moss)
+                                    .buttonStyle(YOBROPopupButtonStyle(prominent: true))
                             }
                             if tab.canGoBack {
-                                Button(L("Zurück")) { tab.failure = nil; tab.webView.goBack() }.buttonStyle(.bordered)
+                                Button(L("Zurück")) { tab.failure = nil; tab.webView.goBack() }.buttonStyle(YOBROPopupButtonStyle())
                             }
                         }
                     }.padding(40).frame(maxWidth: .infinity, maxHeight: .infinity).background(paper)
                         .accessibilityIdentifier("page-failure")
                 }
-                if tab.loading {
-                    GeometryReader { geometry in Rectangle().fill(moss.opacity(0.7)).frame(width: geometry.size.width * max(0.03, tab.progress), height: 2) }.frame(height: 2)
-                }
             }
-        }.clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(alignment: .bottomTrailing) { LoginSavePrompt(login: tab.logins) }
-            .overlay {
-                if !tab.url.isEmpty && !tab.isNote {
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(ink.opacity(0.08), lineWidth: 1)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if tab.showFind && !tab.url.isEmpty && !tab.isNote { PageFindBar(tab: tab).padding(12) }
-            }
-    }
-}
-
-private struct NoteEditor: View {
-    @ObservedObject var tab: BrowserTab
-    @ObservedObject var model: BrowserModel
-    @StateObject private var commands = RichTextCommands()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "note.text").foregroundStyle(moss)
-                TextField(L("Titel der Notiz", "Note title"), text: $tab.title)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 18, weight: .semibold))
-                    .onChange(of: tab.title) { _, _ in model.save() }
-                Spacer()
-                Text(L("Automatisch gespeichert", "Saved automatically"))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 24).frame(height: 58)
-            Divider().opacity(0.45)
-            RichTextToolbar(commands: commands).padding(.horizontal, 20).frame(height: 42)
-            Divider().opacity(0.3)
-            RichTextEditor(rtf: tab.noteRTF, fallbackText: tab.noteContent, commands: commands) { rtf, text in
-                tab.noteRTF = rtf
-                tab.noteContent = text
-                model.save()
-            }
-                .accessibilityLabel(L("Notizinhalt", "Note content"))
         }
-        .background(paper)
-        .accessibilityIdentifier("note-editor")
+        .overlay(alignment: .bottomTrailing) { LoginSavePrompt(login: tab.logins) }
+        .overlay(alignment: .topTrailing) {
+            if tab.showFind && !tab.url.isEmpty { PageFindBar(tab: tab).padding(12) }
+        }
     }
 }
 
@@ -1919,90 +1731,28 @@ struct YOBROMark: View {
     }
 }
 
-private struct AgentPageHeader: View {
-    @ObservedObject var tab: BrowserTab
-    var body: some View {
-        HStack(spacing: 8) {
-            if tab.loading { ProgressView().controlSize(.mini) }
-            Text(tab.url.isEmpty ? L("Agentenseite", "Agent page") : tab.url)
-                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 0)
-        }.padding(.horizontal, 12).frame(height: 28)
-    }
-}
-
-/// Observe both the external session and the built-in chat, independently of split layout.
+/// An orange glow around the window while the assistant or an external
+/// agent is working, independent of the split layout.
 private struct AgentActivityFrame: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject var chat: SpaceChatStore
-    @ObservedObject var voice: YoBroVoice
-
-    private var activeConversation: Bool {
-        voice.optionRecordingActive || voice.isListening && VoiceWake.acceptsFollowUp(until: voice.activeUntil)
-    }
-    private var frameColor: Color { activeConversation ? YOBROTheme.voiceListening : brandOrange }
 
     var body: some View {
-        if activeConversation || model.agentUsageActive {
+        if model.agentUsageActive {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(frameColor.opacity(0.85), lineWidth: 2)
+                    .stroke(brandOrange.opacity(0.85), lineWidth: 2)
                     .padding(1)
                 RoundedRectangle(cornerRadius: 17)
-                    .stroke(frameColor.opacity(0.28), lineWidth: 10)
+                    .stroke(brandOrange.opacity(0.25), lineWidth: 10)
                     .blur(radius: 12)
                     .padding(7)
-                RoundedRectangle(cornerRadius: 19)
-                    .stroke(frameColor.opacity(0.14), lineWidth: 20)
-                    .blur(radius: 24)
-                    .padding(10)
             }
             // The browser content extends beneath the hidden title bar, so
             // the active-agent frame must claim that top inset as well.
             .ignoresSafeArea(.container, edges: .top)
             .allowsHitTesting(false)
             .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: activeConversation)
-        }
-    }
-}
-
-private struct VoiceStatusHUD: View {
-    @ObservedObject var model: BrowserModel
-    @ObservedObject var chat: SpaceChatStore
-    @ObservedObject var voice: YoBroVoice
-
-    private var canStop: Bool { chat.running || voice.hasCurrentActivity }
-
-    var body: some View {
-        if voice.enabled || chat.running {
-            Group {
-                if canStop {
-                    Button {
-                        voice.stopCurrentAction(browser: model)
-                    } label: {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Color.red, in: Circle())
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L("Aktuelle Aktion stoppen", "Stop current action"))
-                    .accessibilityValue(voice.state)
-                    .help(voice.state)
-                } else {
-                    Circle()
-                        .fill(moss)
-                        .frame(width: 11, height: 11)
-                        .frame(width: 36, height: 36)
-                        .accessibilityLabel(voice.state)
-                        .help(voice.state)
-                }
-            }
-            .shadow(color: .black.opacity(canStop ? 0.22 : 0.12), radius: canStop ? 10 : 5, y: 3)
-            .animation(.easeInOut(duration: 0.2), value: canStop)
         }
     }
 }
