@@ -48,7 +48,7 @@ RESOURCES="$BUILD_BIN/YOBRO_YOBRO.bundle"
 if [ -d "$RESOURCES/Contents/Resources" ]; then RESOURCES="$RESOURCES/Contents/Resources"; fi
 # Explicit allowlist. Never copy the checkout, a home directory or runtime state.
 for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js \
-  DarkReader-LICENSE.txt English.json YOBROMark.png LoginAutofill.js \
+  DarkReader-LICENSE.txt English.json YOBROMark.png LoginAutofill.js PageSignals.js \
   uBlockOriginLite.safari.zip uBlockOriginLite-NOTICE.txt; do
   cp "$RESOURCES/$resource" "$APP/Contents/Resources/YOBRO_YOBRO.bundle/$resource"
 done

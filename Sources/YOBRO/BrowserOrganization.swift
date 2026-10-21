@@ -34,6 +34,7 @@ extension BrowserModel {
         for index in closedTabs.indices where closedTabs[index].space == original { closedTabs[index].space = value }
         if let icon = spaceIcons.removeValue(forKey: original) { spaceIcons[value] = icon }
         if let tone = spaceTones.removeValue(forKey: original) { spaceTones[value] = tone }
+        moveRememberedTab(from: original, to: value)
         if space == original { space = value }
         persistSession()
     }

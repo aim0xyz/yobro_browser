@@ -1612,11 +1612,20 @@ final class BrowserModel: ObservableObject {
     func undoClosedTabs() {
         let count = closedTabUndoCount
         let previous = closedTabUndoActiveID
+        var last: BrowserTab?
+        // Only the tab that ends up selected loads; the rest return unloaded.
         for _ in 0..<count {
-            if reopenTab() == nil { break }
+            guard let tab = reopenTab(selecting: false) else { break }
+            last = tab
         }
         if let previous, tabs.contains(where: { $0.id == previous }) { select(previous) }
+        else if let last { select(last.id) }
         clearClosedTabUndo()
+    }
+
+    /// Keeps a Space's remembered tab when the Space is renamed.
+    func moveRememberedTab(from original: String, to name: String) {
+        if let id = lastActiveBySpace.removeValue(forKey: original) { lastActiveBySpace[name] = id }
     }
     func dismissClosedTabUndo(_ id: UUID) {
         if closedTabUndoID == id { clearClosedTabUndo() }

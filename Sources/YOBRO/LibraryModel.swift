@@ -377,17 +377,20 @@ extension BrowserModel {
         await Task.detached(priority: .utility) { writeHistory(snapshot, to: destination) }.value
     }
     @discardableResult
-    func reopenTab() -> BrowserTab? {
+    /// - Parameter selecting: `false` restores the tab unloaded, so undoing a
+    ///   batch does not start every page at once.
+    func reopenTab(selecting: Bool = true) -> BrowserTab? {
         guard var saved = closedTabs.popLast() else { return nil }
         clearClosedTabUndo()
         let closedIndex = saved.closedIndex
         saved.closedIndex = nil
         if tabs.contains(where: { $0.id == saved.id }) { saved.id = UUID() }
-        let tab = BrowserTab(saved: saved, owner: self)
+        let tab = BrowserTab(saved: saved, owner: self, deferLoading: !selecting)
         if let closedIndex { tabs.insert(tab, at: min(max(0, closedIndex), tabs.count)) }
         else { tabs.append(tab) }
         if #available(macOS 15.4, *) { extensions.runtime.controller.didOpenTab(tab) }
-        select(tab.id); save(); return tab
+        if selecting { select(tab.id) }
+        save(); return tab
     }
     func moveTab(_ id: UUID, relativeTo target: UUID, after: Bool) -> Bool {
         guard id != target, let source = tabs.first(where: { $0.id == id }), let destination = tabs.first(where: { $0.id == target }), source.space == destination.space else { return false }
