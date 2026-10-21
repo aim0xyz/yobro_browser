@@ -78,11 +78,15 @@ func browserRequest(_ payload: [String: Any]) throws -> [String: Any] {
 }
 
 // In a packaged app the executable and resource bundle are copied together.
+// Bundle lookup covers both the packaged flat layout and SwiftPM's
+// Contents/Resources layout, but never a source directory.
 let candidates = [
-    Bundle.main.resourceURL?.appendingPathComponent("YOBRO_YOBROMCP.bundle/tools.json"),
-    URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.deletingLastPathComponent().appendingPathComponent("YOBRO_YOBROMCP.bundle/tools.json")
-].compactMap { $0 }
-guard let resourceURL = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+    Bundle.main.resourceURL,
+    URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.deletingLastPathComponent()
+].compactMap { directory in
+    directory.flatMap { Bundle(url: $0.appendingPathComponent("YOBRO_YOBROMCP.bundle"))?.url(forResource: "tools", withExtension: "json") }
+}
+guard let resourceURL = candidates.first,
       let resourceData = try? Data(contentsOf: resourceURL),
       let tools = try? JSONSerialization.jsonObject(with: resourceData) as? [[String: Any]] else {
     FileHandle.standardError.write(Data("YOBRO MCP resources are missing. Reinstall the complete extension.\n".utf8))

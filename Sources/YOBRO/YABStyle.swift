@@ -86,6 +86,37 @@ extension EnvironmentValues {
     }
 }
 
+/// YAB's faint paper grain on the tinted window: fixed noise at 7 %.
+struct ChromeGrain: View {
+    private static let tile: NSImage = {
+        let pixels = 128
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
+                                         samplesPerPixel: 2, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceWhite,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return NSImage() }
+        // A fixed seed keeps the texture identical between launches.
+        var seed: UInt32 = 0x9E37_79B9
+        for y in 0..<pixels {
+            for x in 0..<pixels {
+                seed = seed &* 1_664_525 &+ 1_013_904_223
+                let value = Int(seed >> 24)
+                rep.setColor(NSColor(white: value > 127 ? 1 : 0, alpha: CGFloat(abs(value - 128)) / 128), atX: x, y: y)
+            }
+        }
+        // Half the pixel size in points keeps the grain sharp on Retina.
+        let image = NSImage(size: NSSize(width: pixels / 2, height: pixels / 2))
+        image.addRepresentation(rep)
+        return image
+    }()
+
+    var body: some View {
+        Image(nsImage: Self.tile)
+            .resizable(resizingMode: .tile)
+            .opacity(0.07)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 enum SidebarPreviewTiming {
     static let openDelay: UInt64 = 650_000_000
     static let closeDelay: UInt64 = 350_000_000

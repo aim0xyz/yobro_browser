@@ -46,6 +46,7 @@ struct YOBROApp: App {
                 Button(L("Einrichtung erneut öffnen …")) { browser.showOnboarding = true }
                 Button(L("Erweiterungen und Datenimport …")) { browser.showSettings = true }
                 Button(browser.showSidebar ? L("Seitenleiste einklappen") : L("Seitenleiste einblenden")) { browser.showSidebar.toggle() }.keyboardShortcut("s", modifiers: [.command])
+                Button(browser.tabsOnTop ? L("Tabs in der Seitenleiste", "Tabs in the sidebar") : L("Tabs oben anzeigen", "Show tabs on top")) { browser.tabsOnTop.toggle() }.keyboardShortcut("s", modifiers: [.command, .option])
                 Button(L("Adresse öffnen")) { browser.openCommandBar(.current) }.keyboardShortcut("l")
                 Button(L("Schnellsuche")) { browser.openCommandBar(.newTab) }.keyboardShortcut("k")
                 Button(L("Nach Updates suchen …", "Check for Updates…")) { browser.updates.installAvailableUpdate() }

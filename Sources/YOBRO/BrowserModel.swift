@@ -537,6 +537,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
+        // Shift-click previews a link over the page instead of leaving it.
+        if navigationAction.navigationType == .linkActivated,
+           navigationAction.modifierFlags.contains(.shift), !navigationAction.modifierFlags.contains(.command),
+           ["http", "https"].contains(scheme), let target = navigationAction.request.url,
+           let owner, !isPrivate, !owner.agentTabIDs.contains(id), owner.peekTab?.id != id {
+            decisionHandler(.cancel)
+            owner.peek(target)
+            return
+        }
         if navigationAction.targetFrame?.isMainFrame == true, ["http", "https"].contains(scheme) {
             let catalogAgent = BrowserIdentity.catalogUserAgent(for: navigationAction.request.url)
             if (webView.customUserAgent ?? "") != (catalogAgent ?? "") {
@@ -920,6 +929,14 @@ final class BrowserModel: ObservableObject {
     @Published var showAgent = false
     /// The centred address and search field (⌘T, ⌘L). `nil` while closed.
     @Published var commandBar: CommandBarMode?
+    /// YAB's alternative layout: tabs in a strip above the page instead of
+    /// in the sidebar.
+    @Published var tabsOnTop = UserDefaults.standard.bool(forKey: "YOBRO.tabsOnTop") {
+        didSet { UserDefaults.standard.set(tabsOnTop, forKey: "YOBRO.tabsOnTop") }
+    }
+    /// A link opened with Shift-click, previewed over the page until it is
+    /// closed or kept as a tab. It is not part of `tabs` meanwhile.
+    @Published var peekTab: BrowserTab?
     @Published var agentEnabled = false {
         didSet {
             do {
@@ -1002,6 +1019,9 @@ final class BrowserModel: ObservableObject {
     let websiteDataStore: WKWebsiteDataStore
     private var bridge: ControlBridge?
     private var saveTask: Task<Void, Never>?
+    /// Loads installed extensions and, on a real profile, the bundled
+    /// blocker. It keeps the model and its data store alive until done.
+    private(set) var extensionStartup: Task<Void, Never>?
     /// Coalesces history writes; see `saveLibrary`.
     var libraryTask: Task<Void, Never>?
     @Published var autoSuspendInactiveTabs: Bool = UserDefaults.standard.object(forKey: "YOBRO.autoSuspendInactiveTabs") as? Bool ?? true {
@@ -1072,7 +1092,7 @@ final class BrowserModel: ObservableObject {
         // Extension startup can involve loading a background worker and must
         // never keep ordinary browsing, restored tabs, or the address search
         // waiting behind it.
-        Task { await extensions.start(owner: self) }
+        extensionStartup = Task { await extensions.start(owner: self) }
         if !testing { startTabHibernationMonitoring() }
     }
 
@@ -1209,6 +1229,7 @@ final class BrowserModel: ObservableObject {
         if #available(macOS 15.4, *) { extensions.runtime.controller.didActivateTab(tab, previousActiveTab: previous) }
     }
     func switchSpace(_ value: String) {
+        closePeek()
         space = value; splitID = nil
         if let tab = visibleTabs.first { select(tab.id) }
         else { activeID = nil; requestNewTab(space: value) }

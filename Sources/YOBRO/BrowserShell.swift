@@ -218,28 +218,46 @@ struct BrowserShell: View {
 
     private var tone: SpaceTone { model.spaceTone(for: model.space) }
 
+    /// With tabs on top, the strip replaces the sidebar; ⌘S hides either.
+    private var showsTopStrip: Bool { model.tabsOnTop && model.showSidebar }
+    private var showsSidebar: Bool { !model.tabsOnTop && model.showSidebar }
+    private var contentTopInset: CGFloat { showsTopStrip ? 6 : Chrome.inset }
+
     var body: some View {
-        HStack(spacing: 0) {
-            if model.showSidebar {
-                ShellSidebar(model: model).frame(width: Chrome.sidebarWidth)
+        VStack(spacing: 0) {
+            if showsTopStrip {
+                TopTabStrip(model: model)
+                    .padding(.leading, 96).padding(.trailing, Chrome.inset)
+                    .frame(height: 28)
+                    .padding(.top, 6)
             }
-            workspace
-                .padding(.vertical, Chrome.inset)
-                .padding(.leading, model.showSidebar ? 0 : Chrome.inset)
-                .padding(.trailing, Chrome.inset)
-                .frame(minWidth: 280)
-            if model.showAgent {
-                SpaceChatPanel(browser: model, chat: model.chat)
-                    .frame(width: 340)
-                    .pageCard()
-                    .padding(.vertical, Chrome.inset)
+            HStack(spacing: 0) {
+                if showsSidebar {
+                    ShellSidebar(model: model).frame(width: Chrome.sidebarWidth)
+                }
+                workspace
+                    .overlay {
+                        if let peek = model.peekTab { PeekOverlay(tab: peek, model: model) }
+                    }
+                    .padding(.top, contentTopInset)
+                    .padding(.bottom, Chrome.inset)
+                    .padding(.leading, showsSidebar ? 0 : Chrome.inset)
                     .padding(.trailing, Chrome.inset)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .frame(minWidth: 280)
+                if model.showAgent {
+                    SpaceChatPanel(browser: model, chat: model.chat)
+                        .frame(width: 340)
+                        .pageCard()
+                        .padding(.top, contentTopInset)
+                        .padding(.bottom, Chrome.inset)
+                        .padding(.trailing, Chrome.inset)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
         .ignoresSafeArea(.container, edges: .top)
         .overlay(alignment: .leading) {
-            if !model.showSidebar { hiddenSidebar }
+            if !model.showSidebar && !model.tabsOnTop { hiddenSidebar }
         }
         // Keep the single native macOS traffic-light host above the temporary
         // sidebar overlay as well as the ordinary browser chrome.
@@ -247,14 +265,14 @@ struct BrowserShell: View {
             WindowControls()
                 .frame(width: 60, height: 32)
                 .padding(.leading, 18)
-                .padding(.top, 10)
+                .padding(.top, model.tabsOnTop ? 4 : 10)
                 .opacity(sidebarChromeVisible ? 1 : 0)
                 .allowsHitTesting(sidebarChromeVisible)
                 .accessibilityHidden(!sidebarChromeVisible)
                 .ignoresSafeArea(.container, edges: .top)
         }
         .background(YOBROArrowCursorRegion().ignoresSafeArea())
-        .background(tone.background.ignoresSafeArea())
+        .background(ZStack { tone.background; ChromeGrain() }.ignoresSafeArea())
         .overlay(alignment: .bottomTrailing) {
             VStack(alignment: .trailing, spacing: 8) {
                 if let undoID = model.closedTabUndoID {
@@ -292,6 +310,8 @@ struct BrowserShell: View {
         .animation(.easeOut(duration: 0.45), value: tone)
         .animation(.easeInOut(duration: 0.2), value: model.showAgent)
         .animation(.easeInOut(duration: 0.2), value: model.showSidebar)
+        .animation(.easeInOut(duration: 0.25), value: model.tabsOnTop)
+        .animation(.easeOut(duration: 0.2), value: model.peekTab?.id)
         .animation(.easeOut(duration: 0.12), value: model.commandBar)
         .animation(.easeInOut(duration: 0.2), value: model.agentWorkspaceVisible)
         .onDisappear { sidebarOverlayCloseTask?.cancel() }
@@ -396,7 +416,16 @@ struct BrowserShell: View {
 
     @ViewBuilder
     private var singlePage: some View {
-        if let tab = model.active {
+        if let tab = model.active, model.tabsOnTop {
+            VStack(spacing: 0) {
+                PageBand(tab: tab, model: model)
+                Divider().opacity(0.5)
+                TabContent(tab: tab, model: model)
+            }
+            .id(tab.id)
+            .background(paper)
+            .pageCard()
+        } else if let tab = model.active {
             TabContent(tab: tab, model: model).id(tab.id).pageCard()
         } else {
             StartPage(model: model).pageCard()
@@ -404,7 +433,7 @@ struct BrowserShell: View {
     }
 
     private var sidebarChromeVisible: Bool {
-        model.showSidebar || model.sidebarOverlayVisible
+        model.showSidebar || (!model.tabsOnTop && model.sidebarOverlayVisible)
     }
 
     private func revealSidebarOverlay() {
@@ -673,12 +702,189 @@ private struct AddressPlate: View {
     }
 
     private var hasPage: Bool { !(model.active?.url.isEmpty ?? true) }
+    private var label: String { pageLabel(model.active) }
+}
 
-    private var label: String {
-        guard let tab = model.active, !tab.url.isEmpty else { return L("Suchen oder Adresse eingeben", "Search or enter address") }
-        if tab.isExtensionsHub { return L("Erweiterungen", "Extensions") }
-        guard let host = URL(string: tab.url)?.host else { return tab.title }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+/// The host of a page without "www.", as YAB shows it.
+@MainActor private func pageLabel(_ tab: BrowserTab?) -> String {
+    guard let tab, !tab.url.isEmpty else { return L("Suchen oder Adresse eingeben", "Search or enter address") }
+    if tab.isExtensionsHub { return L("Erweiterungen", "Extensions") }
+    guard let host = URL(string: tab.url)?.host else { return tab.title }
+    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+}
+
+/// YAB's tabs-on-top layout: the Space, pinned tabs and today's tabs in one
+/// strip beside the window controls.
+private struct TopTabStrip: View {
+    @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
+
+    private var tabs: [BrowserTab] { model.visibleTabs.filter { !$0.pinned } }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Menu {
+                ForEach(model.spaces, id: \.self) { space in
+                    Button { model.switchSpace(space) } label: {
+                        Label(space, systemImage: space == model.space ? "checkmark" : model.spaceIcon(for: space).rawValue)
+                    }
+                }
+                Divider()
+                SpaceIconMenu(model: model, space: model.space)
+                SpaceToneMenu(model: model, space: model.space)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: model.spaceIcon(for: model.space).rawValue).font(.system(size: 11))
+                    Text(model.space).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(tone.muted)
+                .padding(.horizontal, 8).frame(height: 28)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .yobroHelp(L("Space wechseln", "Switch space"))
+            ForEach(model.visibleTabs.filter(\.pinned)) { tab in TopPin(tab: tab, model: model) }
+            GeometryReader { geometry in
+                let width = min(186, max(36, (geometry.size.width - 32) / CGFloat(max(1, tabs.count)) - 2))
+                HStack(spacing: 2) {
+                    ForEach(tabs) { tab in TopTab(tab: tab, model: model).frame(width: width) }
+                    Button { model.openCommandBar(.newTab) } label: { Image(systemName: "plus") }
+                        .buttonStyle(ChromeButtonStyle(size: 28))
+                        .yobroHelp(L("Neuer Tab · ⌘T"))
+                }
+            }
+            .clipped()
+            Button { model.showAgent.toggle() } label: {
+                Image(systemName: "sparkles")
+                    .overlay(alignment: .topTrailing) {
+                        if model.agentUsageActive { Circle().fill(brandOrange).frame(width: 6, height: 6).offset(x: 3, y: -2) }
+                    }
+            }
+            .buttonStyle(ChromeButtonStyle(size: 28))
+            .yobroHelp(L("Assistent · ⇧⌘A", "Assistant · ⇧⌘A"))
+            Menu { LibraryMenuItems(model: model) } label: { Image(systemName: "square.grid.2x2") }
+                .menuStyle(.button).buttonStyle(ChromeButtonStyle(size: 28)).menuIndicator(.hidden).fixedSize()
+                .yobroHelp(L("Bibliothek und Einstellungen", "Library and settings"))
+        }
+    }
+}
+
+private struct TopPin: View {
+    @ObservedObject var tab: BrowserTab
+    @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    var body: some View {
+        Button { model.select(tab.id) } label: {
+            TabFavicon(tab: tab)
+                .foregroundStyle(tone.muted)
+                .frame(width: 30, height: 28)
+                .background(tab.id == model.activeID ? Chrome.wash : hovering ? Chrome.restHover : Chrome.rest, in: RoundedRectangle(cornerRadius: Chrome.radius))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button(L("Loslösen")) { tab.pinned = false; model.save() }
+            Button(L("Tab löschen", "Delete tab")) { model.closeSidebarTab(tab.id) }
+        }
+        .yobroHelp(tab.sidebarHelp)
+        .accessibilityLabel(tab.sidebarTitle)
+    }
+}
+
+private struct TopTab: View {
+    @ObservedObject var tab: BrowserTab
+    @ObservedObject var model: BrowserModel
+    @Environment(\.spaceTone) private var tone
+    @State private var hovering = false
+
+    private var selected: Bool { tab.id == model.activeID }
+
+    var body: some View {
+        Button { model.select(tab.id) } label: {
+            HStack(spacing: 6) {
+                TabFavicon(tab: tab)
+                Text(tab.sidebarTitle).font(.system(size: 13)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 6).padding(.trailing, hovering ? 26 : 7)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selected ? ink : tone.muted)
+        .frame(height: 28)
+        .background(selected ? Chrome.wash : hovering ? Chrome.hover : .clear, in: RoundedRectangle(cornerRadius: Chrome.radius))
+        .overlay(alignment: .trailing) {
+            if hovering {
+                Button { model.closeSidebarTab(tab.id) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }
+                    .buttonStyle(ChromeButtonStyle(size: 20))
+                    .padding(.trailing, 4)
+                    .yobroHelp(L("Tab löschen", "Delete tab"))
+            }
+        }
+        .onHover { hovering = $0 }
+        .contextMenu {
+            if !tab.isPrivate { Button(L("Anpinnen")) { tab.pinned = true; model.save() } }
+            Button(L("Tab duplizieren")) { model.newTab(url: tab.url, space: tab.space, isPrivate: tab.isPrivate) }
+            Button(L("Tab löschen", "Delete tab")) { model.closeSidebarTab(tab.id) }
+        }
+        .yobroHelp(tab.sidebarHelp)
+        .accessibilityLabel(tab.sidebarTitle)
+    }
+}
+
+/// The slim bar above a page in the tabs-on-top layout: navigation on the
+/// left, the site in the middle, page actions on the right.
+private struct PageBand: View {
+    @ObservedObject var tab: BrowserTab
+    @ObservedObject var model: BrowserModel
+    @State private var showingActions = false
+    @State private var siteHover = false
+
+    var body: some View {
+        HStack(spacing: 2) {
+            door("chevron.left", L("Zurück")) { tab.webView.goBack() }.disabled(!tab.canGoBack)
+            door("chevron.right", L("Vorwärts")) { tab.webView.goForward() }.disabled(!tab.canGoForward)
+            door(tab.loading ? "xmark" : "arrow.clockwise", tab.loading ? L("Laden stoppen", "Stop loading") : L("Neu laden")) {
+                if tab.loading { tab.webView.stopLoading() } else { tab.webView.reload() }
+            }.disabled(tab.url.isEmpty)
+            Spacer(minLength: 0)
+            if !tab.isPrivate && !tab.url.isEmpty { LoginAutofillButton(login: tab.logins) }
+            door("slider.horizontal.3", L("Kontrollzentrum", "Control Center")) { showingActions.toggle() }
+                .popover(isPresented: $showingActions, arrowEdge: .bottom) {
+                    SidebarPageActions(model: model, tab: tab, store: model.extensions) { showingActions = false }
+                }
+        }
+        .overlay {
+            Button { model.openCommandBar(.current) } label: {
+                HStack(spacing: 4) {
+                    if tab.isPrivate { Image(systemName: "eyeglasses").font(.system(size: 11)) }
+                    Text(pageLabel(tab)).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                }
+                .foregroundStyle(ink)
+                .padding(.horizontal, 8).frame(height: 24)
+                .background(siteHover ? ink.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { siteHover = $0 }
+            .yobroHelp(tab.url.isEmpty ? "⌘L" : tab.url + " · ⌘L")
+        }
+        .padding(.horizontal, 3)
+        .frame(height: 36)
+        .background(paper)
+        .foregroundStyle(ink.opacity(0.72))
+    }
+
+    private func door(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).font(.system(size: 14)).frame(width: 30, height: 30) }
+            .buttonStyle(YOBROButtonStyle(minimumSize: 30))
+            .yobroHelp(help)
+            .accessibilityLabel(help)
     }
 }
 
@@ -882,6 +1088,18 @@ private struct SpaceMenuItems: View {
     var body: some View {
         Button(L("Space umbenennen …")) { edit(.renameSpace(space)) }
         SpaceIconMenu(model: model, space: space)
+        SpaceToneMenu(model: model, space: space)
+        Divider()
+        Button(L("Neuer Ordner …")) { edit(.newFolder) }
+        Button(L("Neuer Space …")) { edit(.newSpace) }
+    }
+}
+
+private struct SpaceToneMenu: View {
+    @ObservedObject var model: BrowserModel
+    let space: String
+
+    var body: some View {
         Menu {
             ForEach(SpaceTone.allCases) { tone in
                 Button { model.setSpaceTone(tone, for: space) } label: {
@@ -889,9 +1107,6 @@ private struct SpaceMenuItems: View {
                 }
             }
         } label: { Label(L("Space-Farbe", "Space color"), systemImage: "paintpalette") }
-        Divider()
-        Button(L("Neuer Ordner …")) { edit(.newFolder) }
-        Button(L("Neuer Space …")) { edit(.newSpace) }
     }
 }
 
@@ -1037,6 +1252,8 @@ private struct LibraryMenuItems: View {
                 Button(L("Profil bearbeiten …", "Edit profile …")) { model.creatingProfile = false; model.showProfileEditor = true }
             }
         }
+        Button(model.tabsOnTop ? L("Tabs in der Seitenleiste", "Tabs in the sidebar") : L("Tabs oben anzeigen", "Show tabs on top")) { model.tabsOnTop.toggle() }
+        Divider()
         Button(L("Browserdaten importieren …", "Import browser data …")) { model.settingsSection = L("Daten importieren"); model.showSettings = true }
         Button(L("Einstellungen …", "Settings …")) { model.settingsSection = L("Allgemein", "General"); model.showSettings = true }
     }

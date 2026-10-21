@@ -111,14 +111,28 @@ final class BrowserProfileTests: XCTestCase {
         }
         let cookie = HTTPCookie(properties: [.domain: "profile-persistence.invalid", .path: "/", .name: "session", .value: "synthetic", .expires: Date().addingTimeInterval(3600)])!
         await model!.websiteDataStore.httpCookieStore.setCookie(cookie)
-        try await Task.sleep(nanoseconds: 200_000_000)
-        model = nil
+        // A real profile installs the bundled blocker on startup, which holds
+        // the data store. Under a loaded test run that takes longer than any
+        // fixed delay, so wait for it instead.
+        await model!.extensionStartup?.value
+        try await release(&model)
         model = BrowserModel(profile: profile, root: root)
         let cookies = await model!.websiteDataStore.httpCookieStore.allCookies()
         XCTAssertEqual(cookies.first(where: { $0.name == "session" })?.value, "synthetic")
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await model!.extensionStartup?.value
+        try await release(&model)
+        // WebKit lets go of the store asynchronously once its last user is gone.
+        for attempt in 1...20 {
+            do { try await WKWebsiteDataStore.remove(forIdentifier: profile.id); break }
+            catch where attempt < 20 { try await Task.sleep(nanoseconds: 150_000_000) }
+        }
+    }
+
+    /// Drops the model and fails if anything still keeps it alive.
+    private func release(_ model: inout BrowserModel?) async throws {
+        weak var released = model
         model = nil
-        try await Task.sleep(nanoseconds: 100_000_000)
-        try await WKWebsiteDataStore.remove(forIdentifier: profile.id)
+        for _ in 0..<40 where released != nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertNil(released, "The browser model must be released with its profile")
     }
 }
