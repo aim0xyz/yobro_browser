@@ -62,6 +62,58 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertFalse(model.agentUsageActive)
     }
 
+    func testClosedAgentTabIsNotOfferedForReopening() {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
+        let tab = model.newAgentTab()
+        model.closeTab(tab.id)
+        XCTAssertTrue(model.closedTabs.isEmpty)
+        XCTAssertNil(model.closedTabUndoID)
+    }
+
+    func testChatTabsCloseOnSpaceSwitchWithoutRevokingAccess() {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
+        _ = model.newAgentTab(startsExternalSession: false)
+        XCTAssertFalse(model.agentSessionActive)
+        model.switchSpace(model.spaces[1])
+        XCTAssertTrue(model.agentEnabled)
+        XCTAssertTrue(AgentAccessPermission.load(home: home).allowed)
+        XCTAssertTrue(model.agentTabIDs.isEmpty)
+        XCTAssertFalse(model.agentUsageActive)
+    }
+
+    func testAgentPagesStayOutOfHistory() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
+        let tab = model.newAgentTab()
+        tab.webView.loadHTMLString("<html><head><title>Agent</title></head><body>Agent</body></html>", baseURL: URL(string: "https://agent-history.test/"))
+        for _ in 0..<60 where tab.webView.isLoading || tab.webView.url == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(tab.webView.url?.host, "agent-history.test")
+        XCTAssertFalse(model.history.contains { $0.url.contains("agent-history.test") })
+    }
+
+    func testPagesCannotMultiplyAgentTabs() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        model.agentEnabled = true
+        let opener = model.newAgentTab()
+        opener.webView.loadHTMLString("<html><body>Opener</body></html>", baseURL: URL(string: "https://agent-popups.test/"))
+        for _ in 0..<60 where opener.webView.isLoading || opener.webView.url == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        for _ in 0..<(BrowserModel.maxAgentTabs + 2) {
+            _ = try? await opener.webView.evaluateJavaScript("window.open('about:blank'); true")
+        }
+        XCTAssertEqual(model.agentTabIDs.count, BrowserModel.maxAgentTabs)
+    }
+
     func testManualStopCancelsCurrentChat() {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }

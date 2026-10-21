@@ -39,11 +39,16 @@ final class PageZoomStore: ObservableObject {
     @discardableResult
     func step(_ direction: Int, for url: URL?) -> Double? {
         guard let key = Self.key(for: url) else { return nil }
-        let current = levelsByHost[key] ?? Self.standard
-        let index = Self.levels.firstIndex(of: current) ?? Self.levels.firstIndex(of: Self.standard) ?? 0
-        let next = Self.levels[min(max(0, index + direction), Self.levels.count - 1)]
+        let next = Self.stepped(from: levelsByHost[key] ?? Self.standard, direction)
         store(next, key: key)
         return next
+    }
+
+    /// The rung `direction` steps from the one nearest to `current`. An
+    /// extension can set a zoom that is not on the ladder.
+    static func stepped(from current: Double, _ direction: Int) -> Double {
+        let nearest = levels.indices.min { abs(levels[$0] - current) < abs(levels[$1] - current) } ?? 0
+        return levels[min(max(0, nearest + direction), levels.count - 1)]
     }
 
     @discardableResult

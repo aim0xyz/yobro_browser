@@ -3,13 +3,15 @@ import Sparkle
 import SwiftUI
 
 /// Sparkle owns downloading, signature verification, replacement, and relaunch.
-/// This wrapper deliberately performs background *information* checks only. The
-/// user chooses installation from YoBro's sidebar or the Browser menu.
+/// One updater serves the whole app, however many profiles are open. Scheduled
+/// checks present Sparkle's own update window; a found version also shows in
+/// the sidebar, and the Browser menu starts a check on demand.
 @MainActor
 final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
+    static let shared = UpdateService()
+
     @Published private(set) var availableVersion: String?
     @Published private(set) var checking = false
-    @Published private(set) var status: String?
 
     private var controller: SPUStandardUpdaterController?
     private var started = false
@@ -26,13 +28,6 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
     }
 
-    func checkSilently() {
-        guard let controller, controller.updater.canCheckForUpdates, !checking else { return }
-        checking = true
-        status = nil
-        controller.updater.checkForUpdateInformation()
-    }
-
     func installAvailableUpdate() {
         guard let controller, controller.updater.canCheckForUpdates else { return }
         // The standard Sparkle UI presents release notes and requires the user's
@@ -46,16 +41,14 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
-        availableVersion = nil
-        checking = false
         // Sparkle uses this callback for both the normal "already current"
         // result and a rejected update. Neither needs a sidebar interruption.
-        status = nil
+        availableVersion = nil
+        checking = false
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         checking = false
-        if let error { status = error.localizedDescription }
     }
 }
 

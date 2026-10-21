@@ -27,6 +27,36 @@ final class ExtensionRuntimeTests: XCTestCase {
     }
 
     @MainActor
+    func testPrivateTabsAreHiddenFromExtensions() async throws {
+        guard #available(macOS 15.4, *) else { throw XCTSkip("Needs macOS 15.4") }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = home.appendingPathComponent("fixture")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let previousHome = getenv("YOBRO_HOME").map { String(cString: $0) }
+        setenv("YOBRO_HOME", home.path, 1)
+        defer {
+            if let previousHome { setenv("YOBRO_HOME", previousHome, 1) } else { unsetenv("YOBRO_HOME") }
+            try? FileManager.default.removeItem(at: home)
+        }
+        try #"{"manifest_version":3,"name":"Tabs probe","version":"1.0"}"#.write(to: source.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+        let context = WKWebExtensionContext(for: try await WKWebExtension(resourceBaseURL: source))
+        let model = BrowserModel(root: home)
+        await model.extensionStartup?.value
+        let runtime = model.extensions.runtime
+        let ordinary = model.newTab()
+        let hidden = model.newTab(isPrivate: true)
+        let later = model.newTab()
+        model.select(hidden.id)
+
+        let listed = runtime.tabs(for: context).compactMap { $0 as? BrowserTab }
+        XCTAssertEqual(listed.map(\.id), [ordinary.id, later.id])
+        XCTAssertNil(runtime.activeTab(for: context))
+        XCTAssertEqual(later.indexInWindow(for: context), 1, "Indices skip private tabs")
+        model.select(ordinary.id)
+        XCTAssertTrue(runtime.activeTab(for: context) as? BrowserTab === ordinary)
+    }
+
+    @MainActor
     func testActionPanelIsArrowlessAndStaysAtTopWhenResized() async throws {
         guard #available(macOS 15.4, *) else { throw XCTSkip("Needs macOS 15.4") }
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -164,9 +164,11 @@ final class ExtensionStore: ObservableObject {
         } catch { message = error.localizedDescription }
     }
     func perform(_ entry: InstalledExtension, tab: BrowserTab?) {
+        // A private tab is never handed to an extension, not even on a click.
+        let target = tab?.isPrivate == true ? nil : tab
         if #available(macOS 15.4, *), let context = runtime.contexts[entry.id] {
-            if let tab { context.userGesturePerformed(in: tab) }
-            context.performAction(for: tab)
+            if let target { context.userGesturePerformed(in: target) }
+            context.performAction(for: target)
         }
     }
 }
@@ -263,8 +265,9 @@ final class ExtensionRuntime: NSObject, WKWebExtensionControllerDelegate, WKWebE
         if let context = contexts[id] { try controller.unload(context); contexts[id] = nil }
         if id == ExtensionStore.bundledBlockerID { blockerReadinessSummary = [:] }
     }
-    func tabs(for context: WKWebExtensionContext) -> [any WKWebExtensionTab] { owner?.tabs ?? [] }
-    func activeTab(for context: WKWebExtensionContext) -> (any WKWebExtensionTab)? { owner?.active }
+    // Private tabs stay invisible to extensions.
+    func tabs(for context: WKWebExtensionContext) -> [any WKWebExtensionTab] { owner?.tabs.filter { !$0.isPrivate } ?? [] }
+    func activeTab(for context: WKWebExtensionContext) -> (any WKWebExtensionTab)? { owner?.active.flatMap { $0.isPrivate ? nil : $0 } }
     func webExtensionController(_ controller: WKWebExtensionController, openWindowsFor context: WKWebExtensionContext) -> [any WKWebExtensionWindow] { [self] }
     func webExtensionController(_ controller: WKWebExtensionController, focusedWindowFor context: WKWebExtensionContext) -> (any WKWebExtensionWindow)? { self }
     func webExtensionController(_ controller: WKWebExtensionController, openNewTabUsing configuration: WKWebExtension.TabConfiguration, for context: WKWebExtensionContext, completionHandler: @escaping ((any WKWebExtensionTab)?, Error?) -> Void) {
@@ -334,7 +337,7 @@ final class ExtensionRuntime: NSObject, WKWebExtensionControllerDelegate, WKWebE
 @available(macOS 15.4, *)
 extension BrowserTab: WKWebExtensionTab {
     func window(for context: WKWebExtensionContext) -> (any WKWebExtensionWindow)? { owner?.extensions.runtime }
-    func indexInWindow(for context: WKWebExtensionContext) -> Int { owner?.tabs.firstIndex { $0.id == id } ?? 0 }
+    func indexInWindow(for context: WKWebExtensionContext) -> Int { owner?.tabs.filter { !$0.isPrivate }.firstIndex { $0.id == id } ?? 0 }
     func webView(for context: WKWebExtensionContext) -> WKWebView? { webView }
     func title(for context: WKWebExtensionContext) -> String? { title }
     func url(for context: WKWebExtensionContext) -> URL? { webView.url }

@@ -31,6 +31,8 @@ struct StoredSession: Codable, Equatable {
     var spaceTones: [String: String]? = nil
     var folders: [TabFolder]? = nil
     var splitPairs: [StoredSplit]? = nil
+    /// Space name to the id of the tab last selected there.
+    var lastActiveBySpace: [String: String]? = nil
 }
 
 /// Time spans offered when clearing website data.
@@ -171,7 +173,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             if oldValue != pinned { owner?.objectWillChange.send() }
         }
     }
-    @Published var folderID: UUID?
+    @Published var folderID: UUID? {
+        didSet {
+            // Folder sections filter the owner's tab array, like pins above.
+            if oldValue != folderID { owner?.objectWillChange.send() }
+        }
+    }
     @Published var favicon: NSImage?
     @Published var loading = false
     @Published var progress = 0.0
@@ -186,6 +193,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var showFind = false
+    /// Bumped by ⌘F so the find field takes focus again while already open.
+    @Published var findFocusRequest = 0
     @Published var findQuery = ""
     @Published var findFound: Bool?
     @Published var findError: String?
@@ -193,10 +202,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     var lastActiveAt: Date = Date()
     let isPrivate: Bool
     weak var owner: BrowserModel?
+    /// The tab whose page opened this one with `window.open`. Closing this tab
+    /// returns there. Not persisted.
+    var openerID: UUID?
     private var observers: [NSKeyValueObservation] = []
     private var persistedFaviconData: Data?
     /// Guards against reload loops when the web content process keeps crashing.
-    private var rendererRestarts = 0
+    private var lastAutomaticReload: Date?
+    /// Zoom of a private tab. Kept here so it never reaches page-zoom.json.
+    private var privateZoom: Double?
     /// Session state from disk, consumed by the first load of this tab.
     private var restorableInteractionState: Data?
     /// Session state is a few kilobytes per tab; refuse pathological payloads so
@@ -255,7 +269,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                     guard let self else { return }
                     guard !self.isSuspended, !self.isExtensionsHub, view.url?.scheme != "about" else { return }
                     self.title = view.title?.isEmpty == false ? view.title! : L("Neue Seite")
-                    if #available(macOS 15.4, *) { self.owner?.extensions.runtime.controller.didChangeTabProperties(.title, for: self) }
+                    if #available(macOS 15.4, *), !self.isPrivate { self.owner?.extensions.runtime.controller.didChangeTabProperties(.title, for: self) }
                     self.owner?.updateVisitTitle(self)
                     self.owner?.save()
                 }
@@ -265,14 +279,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                     guard let self else { return }
                     guard !self.isSuspended, !self.isExtensionsHub, view.url?.scheme != "about" else { return }
                     self.url = view.url?.absoluteString ?? ""
-                    if #available(macOS 15.4, *) { self.owner?.extensions.runtime.controller.didChangeTabProperties(.URL, for: self) }
+                    if #available(macOS 15.4, *), !self.isPrivate { self.owner?.extensions.runtime.controller.didChangeTabProperties(.URL, for: self) }
                     self.owner?.save()
                 }
             },
             webView.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
                 Task { @MainActor in
                     guard let self, !self.isExtensionsHub else { return }; self.loading = view.isLoading
-                    if #available(macOS 15.4, *) { self.owner?.extensions.runtime.controller.didChangeTabProperties(.loading, for: self) }
+                    if #available(macOS 15.4, *), !self.isPrivate { self.owner?.extensions.runtime.controller.didChangeTabProperties(.loading, for: self) }
                 }
             },
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
@@ -302,6 +316,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         if isExtensionsHub { return nil }
         if isPrivate { return nil }
         if isSuspended { return restorableInteractionState }
+        // A restored tab that was never shown has no live history yet.
+        if let pending = restorableInteractionState, webView.backForwardList.currentItem == nil { return pending }
         guard let live = webView.interactionState as? Data else { return restorableInteractionState }
         return live.count <= Self.interactionStateLimit ? live : nil
     }
@@ -310,12 +326,19 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// remembered level survives navigation within the same site.
     func applyStoredZoom() {
         guard let owner else { return }
-        let level = owner.pageZoom.level(for: webView.url)
+        let stored = owner.pageZoom.level(for: webView.url)
+        let level = isPrivate ? (privateZoom ?? stored) : stored
         if webView.pageZoom != level { webView.pageZoom = level }
     }
 
     /// - Parameter direction: `+1` larger, `-1` smaller, `0` back to 100 %.
     func changeZoom(_ direction: Int) {
+        if isPrivate {
+            let next = direction == 0 ? PageZoomStore.standard : PageZoomStore.stepped(from: webView.pageZoom, direction)
+            privateZoom = next
+            webView.pageZoom = next
+            return
+        }
         guard let owner else { return }
         let applied = direction == 0
             ? owner.pageZoom.reset(for: webView.url)
@@ -364,10 +387,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func suspend(forced: Bool = false) {
         guard (folderID != nil || forced), !isSuspended else { return }
         // Capture the live session before navigating away, so resuming restores
-        // the history and scroll position instead of a bare URL.
-        if let live = webView.interactionState as? Data, live.count <= Self.interactionStateLimit {
+        // the history and scroll position instead of a bare URL. A tab that was
+        // never shown keeps the state it was restored with.
+        if webView.backForwardList.currentItem != nil,
+           let live = webView.interactionState as? Data, live.count <= Self.interactionStateLimit {
             restorableInteractionState = live
         }
+        // Nothing is loaded, so there is no page to release and no reason to
+        // start a web content process for a blank document.
+        if webView.url == nil { isSuspended = true; owner?.save(); return }
         isSuspended = true
         webView.stopLoading()
         pauseMediaPlayback()
@@ -451,11 +479,37 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         owner?.save()
     }
 
+    /// Opens the find bar and asks it to take focus, even when already open.
+    func requestFind() {
+        showFind = true
+        findFocusRequest &+= 1
+    }
+
+    /// The address `navigate` would load for typed text: a URL as entered, a
+    /// bare host made into one, or a search. `nil` for blank input and for the
+    /// internal extensions page, which are not web addresses.
+    static func resolveAddress(_ input: String) throws -> String? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !ExtensionCatalog.isInternal(text) else { return nil }
+        let candidate: String
+        if text.contains("://") { candidate = text }
+        else if !text.contains(" ") && (text.contains(".") || text.hasPrefix("localhost")) {
+            candidate = (text.hasPrefix("localhost") || text.hasPrefix("127.0.0.1") ? "http://" : "https://") + text
+        } else {
+            candidate = SearchEngine.current.url(for: text).absoluteString
+        }
+        guard let target = URL(string: candidate), ["https", "http"].contains(target.scheme?.lowercased() ?? ""), target.host != nil else {
+            throw YOBROError.message(L("Nur gültige HTTP- und HTTPS-Adressen werden unterstützt."))
+        }
+        return candidate
+    }
+
     func navigate(_ input: String) throws {
         lastActiveAt = Date()
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if ExtensionCatalog.isInternal(text) {
+            isSuspended = false
             webView.stopLoading()
             url = ExtensionCatalog.internalURL
             webView.customUserAgent = nil
@@ -467,18 +521,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             owner?.save()
             return
         }
-        let candidate: String
-        if text.contains("://") { candidate = text }
-        else if !text.contains(" ") && (text.contains(".") || text.hasPrefix("localhost")) {
-            candidate = (text.hasPrefix("localhost") || text.hasPrefix("127.0.0.1") ? "http://" : "https://") + text
-        } else {
-            var components = URLComponents(string: "https://duckduckgo.com/")!
-            components.queryItems = [URLQueryItem(name: "q", value: text)]
-            candidate = components.url!.absoluteString
-        }
-        guard let target = URL(string: candidate), ["https", "http"].contains(target.scheme?.lowercased() ?? ""), target.host != nil else {
-            throw YOBROError.message(L("Nur gültige HTTP- und HTTPS-Adressen werden unterstützt."))
-        }
+        guard let candidate = try Self.resolveAddress(text), let target = URL(string: candidate) else { return }
+        // A new address replaces whatever a suspended tab would have resumed.
+        isSuspended = false; restorableInteractionState = nil
         error = nil; url = candidate; favicon = nil; persistedFaviconData = nil
         webView.customUserAgent = BrowserIdentity.catalogUserAgent(for: target)
         webView.load(URLRequest(url: target))
@@ -512,7 +557,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         // document. Never let that housekeeping navigation erase the retained
         // page's favicon/title/history.
         if isSuspended || isExtensionsHub || webView.url?.scheme == "about" { error = nil; return }
-        if #available(macOS 15.4, *) { owner?.extensions.runtime.controller.didChangeTabProperties([.URL, .title, .loading], for: self) }
+        if #available(macOS 15.4, *), !isPrivate { owner?.extensions.runtime.controller.didChangeTabProperties([.URL, .title, .loading], for: self) }
         let pageURL = webView.url
         Task { [weak self] in
             let icon = await FaviconStore.shared.image(for: webView)
@@ -520,23 +565,39 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 self?.setFavicon(icon)
             }
         }
-        failure = nil; rendererRestarts = 0; findFound = nil; owner?.save(); owner?.recordVisit(self); owner?.webAppearance.update(webView) }
+        failure = nil; findFound = nil; owner?.save()
+        // Agent browsing is not the user's history.
+        if owner?.agentTabIDs.contains(id) != true { owner?.recordVisit(self) }
+        owner?.webAppearance.update(webView)
+    }
 
     /// A crashed web content process leaves a blank view behind. Reload once so
     /// a transient crash heals itself, but stop after that instead of looping.
+    /// The limit is time-based: a page that crashes again right after loading
+    /// would otherwise reset a counter on every successful load.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard !isExtensionsHub else { return }
-        guard rendererRestarts < 1, !isSuspended, !url.isEmpty else {
+        let reloadedRecently = lastAutomaticReload.map { Date().timeIntervalSince($0) <= 60 } ?? false
+        guard !isSuspended, !url.isEmpty, !reloadedRecently else {
             failure = PageFailure(title: L("Die Seite wurde beendet.", "The page stopped responding."),
                                   detail: L("Der Seiteninhalt ist mehrfach abgestürzt. Lade sie neu oder öffne sie in einem neuen Tab.", "The page content crashed repeatedly. Reload it or open it in a new tab."),
                                   symbol: "exclamationmark.arrow.triangle.2.circlepath")
             return
         }
-        rendererRestarts += 1
+        lastAutomaticReload = Date()
         webView.reload()
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
+        // ⌘-click and middle-click (button 4 in WebKit's numbering) open the
+        // link in a new tab behind this one; adding Shift brings it forward.
+        if navigationAction.navigationType == .linkActivated, ["http", "https"].contains(scheme),
+           navigationAction.modifierFlags.contains(.command) || navigationAction.buttonNumber == 4,
+           let target = navigationAction.request.url, let owner, !owner.agentTabIDs.contains(id) {
+            decisionHandler(.cancel)
+            owner.openLinkInNewTab(target, from: self, activate: navigationAction.modifierFlags.contains(.shift))
+            return
+        }
         // Shift-click previews a link over the page instead of leaving it.
         if navigationAction.navigationType == .linkActivated,
            navigationAction.modifierFlags.contains(.shift), !navigationAction.modifierFlags.contains(.command),
@@ -564,7 +625,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         if navigationAction.shouldPerformDownload, ["http", "https", "blob"].contains(scheme) { decisionHandler(.download); return }
         var extensionURL = false
         if #available(macOS 15.4, *), let url = navigationAction.request.url { extensionURL = owner?.extensions.runtime.controller.extensionContext(for: url) != nil }
-        if ["http", "https", "about"].contains(scheme) || extensionURL { decisionHandler(.allow); return }
+        // Generated documents (blob:, and data: inside frames) belong to the
+        // page. A top-level data: URL stays blocked as a spoofing vector.
+        let isSubframe = navigationAction.targetFrame.map { !$0.isMainFrame } ?? false
+        if ["http", "https", "about", "blob"].contains(scheme) || (scheme == "data" && isSubframe) || extensionURL { decisionHandler(.allow); return }
         decisionHandler(.cancel)
         openExternally(navigationAction)
     }
@@ -648,14 +712,22 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         guard navigationAction.targetFrame == nil, let owner else { return nil }
         let popup: BrowserTab
         if owner.agentTabIDs.contains(id) {
-            guard (owner.agentEnabled || owner.chat.running) && owner.isProfileActive else { return nil }
-            popup = owner.newAgentTab(webViewConfiguration: configuration, useConfigurationDirectly: true)
+            // A page must not be able to multiply agent tabs through window.open.
+            guard (owner.agentEnabled || owner.chat.running) && owner.isProfileActive,
+                  owner.agentTabIDs.count < BrowserModel.maxAgentTabs else { return nil }
+            popup = owner.newAgentTab(webViewConfiguration: configuration, useConfigurationDirectly: true, startsExternalSession: false)
         } else {
+            // A popup opened from a preview needs its opener kept and visible,
+            // or window.opener would point at a discarded page.
+            if owner.peekTab?.id == id { owner.keepPeek(split: false) }
             popup = owner.newTab(space: space, isPrivate: isPrivate, webViewConfiguration: configuration, useConfigurationDirectly: true)
+            popup.openerID = id
         }
         return popup.webView
     }
-    func webViewDidClose(_ webView: WKWebView) { owner?.closeTab(id) }
+    func webViewDidClose(_ webView: WKWebView) {
+        if let owner, owner.peekTab?.id == id { owner.closePeek() } else { owner?.closeTab(id, scriptClosed: true) }
+    }
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         if let owner, owner.agentTabIDs.contains(id) {
             error = L("Die Agentenseite hat einen Dialog angefordert. Pausiere den Agenten, um die Seite zu übernehmen.", "The agent page requested a dialog. Pause the agent to take over the page.")
@@ -814,6 +886,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 }
 
+/// A short confirmation shown at the bottom of the window. Unlike `notice`,
+/// it never blocks and goes away on its own.
+struct BrowserToast: Identifiable, Equatable {
+    let id: UUID
+    let icon: String
+    let text: String
+}
+
 enum YOBROError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
@@ -824,7 +904,15 @@ final class BrowserModel: ObservableObject {
     weak var sidebarScrollView: NSScrollView?
     @Published var tabs: [BrowserTab] = []
     @Published var activeID: UUID?
-    @Published var space = L("Persönlich") { didSet { if oldValue != space { chat.cancel(); if agentSessionActive || !agentTabIDs.isEmpty { pauseAgentWorkspace() } } } }
+    @Published var space = L("Persönlich") {
+        didSet {
+            guard oldValue != space else { return }
+            chat.cancel()
+            // Tabs the built-in chat opened close without revoking external
+            // access; only a socket session is paused.
+            if agentSessionActive { pauseAgentWorkspace() } else if !agentTabIDs.isEmpty { endAgentWorkspace() }
+        }
+    }
     @Published var splitID: UUID?
     @Published var agentTabID: UUID?
     @Published var agentTabIDs: Set<UUID> = []
@@ -893,11 +981,16 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// Upper bound for agent-owned tabs that pages can open through popups.
+    static let maxAgentTabs = 6
+
+    /// - Parameter startsExternalSession: `false` for tabs that do not come
+    ///   from the control socket, such as the chat's or a popup's.
     @discardableResult
-    func newAgentTab(url: String = "", webViewConfiguration: WKWebViewConfiguration? = nil, useConfigurationDirectly: Bool = false) -> BrowserTab {
+    func newAgentTab(url: String = "", webViewConfiguration: WKWebViewConfiguration? = nil, useConfigurationDirectly: Bool = false, startsExternalSession: Bool = true) -> BrowserTab {
         let tab = BrowserTab(saved: StoredTab(id: UUID(), title: L("Agentenseite", "Agent page"), url: "", space: space, pinned: false), owner: self, webViewConfiguration: webViewConfiguration, useConfigurationDirectly: useConfigurationDirectly)
         (tab.webView as? AppearanceWebView)?.agentControlled = true
-        agentSessionActive = true
+        if startsExternalSession { agentSessionActive = true }
         agentTabIDs.insert(tab.id)
         tabs.append(tab)
         agentTabID = tab.id
@@ -932,11 +1025,20 @@ final class BrowserModel: ObservableObject {
     /// YAB's alternative layout: tabs in a strip above the page instead of
     /// in the sidebar.
     @Published var tabsOnTop = UserDefaults.standard.bool(forKey: "YOBRO.tabsOnTop") {
-        didSet { UserDefaults.standard.set(tabsOnTop, forKey: "YOBRO.tabsOnTop") }
+        didSet {
+            UserDefaults.standard.set(tabsOnTop, forKey: "YOBRO.tabsOnTop")
+            // The floating sidebar has no place in the top layout; left open
+            // it would keep covering the page's left edge.
+            sidebarOverlayVisible = false
+        }
     }
     /// A link opened with Shift-click, previewed over the page until it is
     /// closed or kept as a tab. It is not part of `tabs` meanwhile.
     @Published var peekTab: BrowserTab?
+    /// The tab the preview was opened from. Selecting another tab closes it.
+    @Published private(set) var peekOpenerID: UUID?
+    /// Page commands (zoom, print, bookmark) act on the preview while it is open.
+    var commandTarget: BrowserTab? { peekTab ?? active }
     @Published var agentEnabled = false {
         didSet {
             do {
@@ -947,13 +1049,21 @@ final class BrowserModel: ObservableObject {
             if !agentEnabled { agentSessionActive = false; agentGeneration = UUID(); for tab in tabs where agentTabIDs.contains(tab.id) { tab.webView.stopLoading() } }
         }
     }
-    @Published var bridgeStatus = L("Startet …")
     @Published var events: [AgentEvent] = []
     @Published var notice: String?
+    @Published private(set) var toast: BrowserToast?
+    /// The Control Center panel, so it can be opened from the keyboard too.
+    @Published var showControlCenter = false
     @Published var webPageDialog: WebPageDialog?
     @Published var history: [HistoryEntry] = []
     @Published var closedTabs: [StoredTab] = []
     @Published private(set) var closedTabUndoID: UUID?
+    /// How many of the newest `closedTabs` the undo toast restores.
+    @Published private(set) var closedTabUndoCount = 1
+    /// The tab that was active before the last batch close; undo returns to it.
+    private var closedTabUndoActiveID: UUID?
+    /// The tab last selected in each Space, so switching back returns to it.
+    @Published private(set) var lastActiveBySpace: [String: UUID] = [:]
     @Published var draggingTabID: UUID?
     @Published var tabDropFeedback: TabDropFeedback?
     @Published var draggingFolderID: UUID?
@@ -985,7 +1095,7 @@ final class BrowserModel: ObservableObject {
     @Published var splitPairs: [StoredSplit] = []
     @Published var showProfileEditor = false
     @Published var creatingProfile = false
-    @Published var settingsSection = L("Erweiterungen")
+    @Published var settingsSection = L("Allgemein", "General")
     @Published var profileName = L("Privat", "Personal")
     var isProfileActive = true { didSet { if !isProfileActive { chat.cancel(); pauseAgentWorkspace() } } }
     weak var profileSession: BrowserProfiles?
@@ -1013,7 +1123,7 @@ final class BrowserModel: ObservableObject {
     let chat: SpaceChatStore
     let webAppearance: WebAppearance
     let pageZoom: PageZoomStore
-    let updates = UpdateService()
+    let updates = UpdateService.shared
     let certificateTrust = CertificateTrustStore()
     let extensions: ExtensionStore
     let websiteDataStore: WKWebsiteDataStore
@@ -1072,6 +1182,8 @@ final class BrowserModel: ObservableObject {
             space = spaces.contains(saved.space) ? saved.space : spaces[0]
             closedTabs = saved.closedTabs ?? []
             tabs = saved.tabs.filter { spaces.contains($0.space) }.map { BrowserTab(saved: $0, owner: self, deferLoading: true) }
+            let restoredIDs = Set(tabs.map(\.id))
+            lastActiveBySpace = (saved.lastActiveBySpace ?? [:]).compactMapValues(UUID.init(uuidString:)).filter { restoredIDs.contains($0.value) }
             // A full relaunch always opens on the branded start page. Restored
             // tabs stay visible in the sidebar and remain deferred until the
             // user deliberately selects one.
@@ -1105,20 +1217,27 @@ final class BrowserModel: ObservableObject {
     /// provided they are not active, loading or playing media.
     @discardableResult
     func suspendInactiveTabs(olderThan timeout: TimeInterval = 30 * 60) async -> [UUID] {
-        guard autoSuspendInactiveTabs else { return [] }
-        let now = Date()
+        // Read the setting itself: background profiles keep their own model and
+        // would otherwise miss a change made in the profile in front.
+        guard UserDefaults.standard.object(forKey: "YOBRO.autoSuspendInactiveTabs") as? Bool ?? true else { return [] }
         var suspendedIDs: [UUID] = []
-        for tab in tabs {
-            guard tab.id != activeID, tab.id != splitID else { continue }
-            guard !agentTabIDs.contains(tab.id) else { continue }
-            guard !tab.url.isEmpty, !tab.isSuspended, !tab.loading else { continue }
-            guard now.timeIntervalSince(tab.lastActiveAt) >= timeout else { continue }
+        for tab in tabs where isHibernationCandidate(tab, timeout: timeout) {
             let playing = await tab.isPlayingMedia()
-            guard !playing else { continue }
+            // The tab may have been selected, closed or navigated meanwhile.
+            guard !playing, isHibernationCandidate(tab, timeout: timeout) else { continue }
             tab.suspend(forced: true)
             suspendedIDs.append(tab.id)
         }
         return suspendedIDs
+    }
+
+    func isHibernationCandidate(_ tab: BrowserTab, timeout: TimeInterval) -> Bool {
+        tabs.contains { $0 === tab }
+            && tab.id != activeID && tab.id != splitID
+            && !agentTabIDs.contains(tab.id)
+            && !tab.url.isEmpty && tab.webView.url != nil
+            && !tab.isSuspended && !tab.loading
+            && Date().timeIntervalSince(tab.lastActiveAt) >= timeout
     }
 
     func startTabHibernationMonitoring() {
@@ -1210,13 +1329,32 @@ final class BrowserModel: ObservableObject {
         }
         let tab = BrowserTab(saved: StoredTab(id: UUID(), title: isPrivate ? L("Privater Tab", "Private tab") : L("Neue Seite"), url: "", space: targetSpace ?? space, pinned: false, isPrivate: isPrivate), owner: self, webViewConfiguration: webViewConfiguration, useConfigurationDirectly: useConfigurationDirectly)
         tabs.append(tab)
-        if #available(macOS 15.4, *) { extensions.runtime.controller.didOpenTab(tab) }
+        if #available(macOS 15.4, *), !isPrivate { extensions.runtime.controller.didOpenTab(tab) }
         select(tab.id)
         if !url.isEmpty { do { try tab.navigate(url) } catch { notice = error.localizedDescription } }
         save(); return tab
     }
+
+    /// Opens a ⌘-clicked or middle-clicked link right after its tab. The new
+    /// tab shares the opener's website data, so a private tab's link stays in
+    /// its private session. It takes neither the opener's folder nor its pin.
+    func openLinkInNewTab(_ url: URL, from opener: BrowserTab, activate: Bool) {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = opener.webView.configuration.websiteDataStore
+        let tab = BrowserTab(saved: StoredTab(id: UUID(), title: url.host ?? L("Neue Seite"), url: "", space: opener.space, pinned: false, isPrivate: opener.isPrivate), owner: self, webViewConfiguration: configuration)
+        // The Peek tab is not in `tabs`, so its links go to the end.
+        if opener !== peekTab, let index = tabs.firstIndex(where: { $0 === opener }) { tabs.insert(tab, at: index + 1) }
+        else { tabs.append(tab) }
+        if #available(macOS 15.4, *), !tab.isPrivate { extensions.runtime.controller.didOpenTab(tab) }
+        do { try tab.navigate(url.absoluteString) } catch { notice = error.localizedDescription }
+        if activate { select(tab.id) }
+        save()
+    }
+
     func select(_ id: UUID) {
         guard let tab = tabs.first(where: { $0.id == id }), !agentTabIDs.contains(id) else { return }
+        // A preview belongs to the page it was opened from.
+        if peekTab != nil, id != peekOpenerID { closePeek() }
         tab.lastActiveAt = Date()
         if space != tab.space { splitID = nil }
         splitID = splitPairs.first(where: { $0.contains(id) })?.other(id)
@@ -1225,14 +1363,117 @@ final class BrowserModel: ObservableObject {
             if pane.webView.url == nil { pane.loadPersistedContent() }
         }
         let previous = active
-        activeID = id; space = tab.space; save()
-        if #available(macOS 15.4, *) { extensions.runtime.controller.didActivateTab(tab, previousActiveTab: previous) }
+        activeID = id; lastActiveBySpace[tab.space] = id; space = tab.space; save()
+        if #available(macOS 15.4, *), !tab.isPrivate {
+            extensions.runtime.controller.didActivateTab(tab, previousActiveTab: previous?.isPrivate == true ? nil : previous)
+        }
     }
+
+    /// Returns to the tab last used in the Space. Without one, the most recently
+    /// used tab is shown, but never a folder or pinned page the user closed.
     func switchSpace(_ value: String) {
+        guard value != space else { return }
         closePeek()
         space = value; splitID = nil
-        if let tab = visibleTabs.first { select(tab.id) }
-        else { activeID = nil; requestNewTab(space: value) }
+        let candidates = visibleTabs
+        // Closing a page with the minus button forgets it here, so a remembered
+        // tab that is suspended was only hibernated.
+        if let remembered = lastActiveBySpace[value], candidates.contains(where: { $0.id == remembered }) {
+            select(remembered)
+        } else if let recent = candidates.filter({ !isUnloaded($0) }).max(by: { $0.lastActiveAt < $1.lastActiveAt }) {
+            select(recent.id)
+        } else {
+            activeID = nil
+            if candidates.isEmpty { requestNewTab(space: value) }
+        }
+    }
+
+    /// A folder or pinned tab whose page was closed but whose entry stays.
+    private func isUnloaded(_ tab: BrowserTab) -> Bool {
+        tab.isSuspended && (tab.folderID != nil || tab.pinned)
+    }
+
+    /// The Space's tabs in the order the tab list shows them: pins first, then
+    /// folders (a collapsed one only shows its active tab), then loose tabs.
+    var displayOrderedTabs: [BrowserTab] {
+        let visible = visibleTabs
+        let pins = visible.filter(\.pinned)
+        let loose = visible.filter { !$0.pinned }
+        if tabsOnTop { return pins + loose }
+        var ordered = pins
+        for folder in folders where folder.space == space {
+            let members = loose.filter { $0.folderID == folder.id }
+            ordered += folder.collapsed ? members.filter { $0.id == activeID } : members
+        }
+        return ordered + loose.filter { $0.folderID == nil }
+    }
+
+    /// Moves to the next (`+1`) or previous (`-1`) tab in display order,
+    /// wrapping at either end.
+    func selectAdjacentTab(_ step: Int) {
+        let list = displayOrderedTabs
+        guard !list.isEmpty else { return }
+        guard let index = list.firstIndex(where: { $0.id == activeID }) else {
+            select((step < 0 ? list.last : list.first)!.id)
+            return
+        }
+        let count = list.count
+        select(list[((index + step) % count + count) % count].id)
+    }
+
+    func cycleSpace(_ step: Int) {
+        guard !spaces.isEmpty else { return }
+        let count = spaces.count
+        let index = spaces.firstIndex(of: space) ?? 0
+        switchSpace(spaces[((index + step) % count + count) % count])
+    }
+
+    /// Opens a link in a preview over the current page, like YAB's Peek.
+    /// Nothing reaches the sidebar until the user keeps the page.
+    func peek(_ url: URL) {
+        closePeek()
+        peekOpenerID = activeID
+        let tab = BrowserTab(saved: StoredTab(id: UUID(), title: url.host ?? url.absoluteString, url: "", space: space, pinned: false), owner: self)
+        peekTab = tab
+        do {
+            try tab.navigate(url.absoluteString)
+            // Keys and scrolling go to the preview while it is open.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.peekTab === tab, let window = tab.webView.window else { return }
+                window.makeFirstResponder(tab.webView)
+            }
+        } catch { closePeek(); notice = error.localizedDescription }
+    }
+
+    func closePeek() {
+        guard let tab = peekTab else { return }
+        if webPageDialog?.tabID == tab.id { resolveWebPageDialog(false) }
+        // Hand the keyboard back to the page underneath.
+        if let window = tab.webView.window, let responder = window.firstResponder as? NSView,
+           responder === tab.webView || responder.isDescendant(of: tab.webView) {
+            window.makeFirstResponder(active?.webView.window === window ? active?.webView : nil)
+        }
+        peekTab = nil
+        peekOpenerID = nil
+        tab.discard()
+    }
+
+    /// Keeps the previewed page as an ordinary tab, optionally beside the
+    /// page it was opened from.
+    func keepPeek(split: Bool) {
+        guard let tab = peekTab else { return }
+        let opener = peekOpenerID
+        peekTab = nil
+        peekOpenerID = nil
+        tabs.append(tab)
+        if #available(macOS 15.4, *) { extensions.runtime.controller.didOpenTab(tab) }
+        let anchor = opener.flatMap { id in id != tab.id && tabs.contains { $0.id == id } ? id : nil }
+        let paired = split && anchor.map { pairTabs(tab.id, with: $0) } == true
+        if !paired { select(tab.id); save() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.tabs.contains(where: { $0 === tab }), let window = tab.webView.window else { return }
+            window.makeFirstResponder(tab.webView)
+        }
     }
 
     func presentWebPageDialog(tabID: UUID, title: String, message: String, kind: WebPageDialog.Kind, defaultText: String = "", destructive: Bool = false, completion: @escaping (WebPageDialog.Response) -> Void) {
@@ -1251,58 +1492,149 @@ final class BrowserModel: ObservableObject {
     func pauseAllMediaPlayback() {
         for tab in tabs { tab.pauseMediaPlayback() }
     }
-    func closeTab(_ id: UUID?, revealStartPage: Bool = false) {
+
+    /// - Parameter scriptClosed: the page closed itself with `window.close()`,
+    ///   e.g. an OAuth popup. Such tabs are not offered for reopening, which
+    ///   also keeps callback URLs out of session.json.
+    func closeTab(_ id: UUID?, revealStartPage: Bool = false, scriptClosed: Bool = false) {
         guard let id else { return }
-        if webPageDialog?.tabID == id { resolveWebPageDialog(false) }
-        if var saved = tabs.first(where: { $0.id == id && !$0.isPrivate })?.stored {
-            saved.closedIndex = tabs.firstIndex(where: { $0.id == id })
-            closedTabs.append(saved)
-            if closedTabs.count > 20 { closedTabs.removeFirst() }
-            closedTabUndoID = UUID()
+        if id == peekOpenerID { closePeek() }
+        let wasActive = activeID == id
+        let partner = splitPairs.first(where: { $0.contains(id) })?.other(id)
+        let opener = tabs.first(where: { $0.id == id })?.openerID
+        if detachTab(id, record: !scriptClosed) {
+            if closedTabs.count > 50 { closedTabs.removeFirst(closedTabs.count - 50) }
+            closedTabUndoID = UUID(); closedTabUndoCount = 1; closedTabUndoActiveID = nil
         }
-        if #available(macOS 15.4, *), let tab = tabs.first(where: { $0.id == id }) { extensions.runtime.controller.didCloseTab(tab) }
-        tabs.first(where: { $0.id == id })?.discard()
-        tabs.removeAll { $0.id == id }
+        if wasActive {
+            activeID = nil
+            if !revealStartPage { selectReplacement(partner: partner, opener: opener) }
+        }
+        save()
+    }
+
+    /// Closes several tabs as one step, so a single undo restores all of them.
+    func closeTabs(_ ids: [UUID], revealStartPage: Bool) {
+        guard !ids.isEmpty else { return }
+        if let peekOpenerID, ids.contains(peekOpenerID) { closePeek() }
+        let previousActive = activeID
+        let wasActive = activeID.map(ids.contains) ?? false
+        let partner = activeID.flatMap { id in splitPairs.first(where: { $0.contains(id) })?.other(id) }
+        let opener = active?.openerID
+        var stored = 0
+        for id in ids {
+            if detachTab(id, record: true) { stored += 1 }
+        }
+        let limit = max(50, stored)
+        if closedTabs.count > limit { closedTabs.removeFirst(closedTabs.count - limit) }
+        if stored > 0 {
+            closedTabUndoID = UUID(); closedTabUndoCount = stored; closedTabUndoActiveID = previousActive
+        }
+        if wasActive {
+            activeID = nil
+            if !revealStartPage { selectReplacement(partner: partner, opener: opener) }
+        }
+        save()
+    }
+
+    /// Closes the Space's loose tabs except `id`. Pins and folders stay.
+    func closeOtherTabs(except id: UUID) {
+        let ids = visibleTabs.filter { !$0.pinned && $0.folderID == nil && $0.id != id }.map(\.id)
+        // The tab the user chose to keep is the one to show.
+        let closesActive = activeID.map(ids.contains) ?? false
+        closeTabs(ids, revealStartPage: closesActive)
+        if closesActive { select(id) }
+    }
+
+    /// Removes a tab without choosing a replacement. Returns whether it was
+    /// stored for reopening; agent and private tabs never are.
+    private func detachTab(_ id: UUID, record: Bool) -> Bool {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        let tab = tabs[index]
+        if webPageDialog?.tabID == id { resolveWebPageDialog(false) }
+        let wasAgentTab = agentTabIDs.contains(id)
+        let stored = record && !wasAgentTab && !tab.isPrivate
+        if stored {
+            var saved = tab.stored
+            saved.closedIndex = index
+            closedTabs.append(saved)
+        }
+        if #available(macOS 15.4, *), !tab.isPrivate { extensions.runtime.controller.didCloseTab(tab) }
+        tab.discard()
+        tabs.remove(at: index)
         splitPairs.removeAll { $0.contains(id) }
         if agentTabIDs.remove(id) != nil {
             if agentTabID == id { agentTabID = tabs.last(where: { agentTabIDs.contains($0.id) })?.id }
             if agentTabIDs.isEmpty { agentWorkspaceVisible = false; agentGeneration = UUID() }
         }
         if splitID == id { splitID = nil }
-        if activeID == id {
-            activeID = nil
-            if !revealStartPage {
-                if let replacement = visibleTabs.last { select(replacement.id) } else { requestNewTab() }
-            }
-        }
-        save()
+        for other in tabs where other.openerID == id { other.openerID = nil }
+        lastActiveBySpace = lastActiveBySpace.filter { $0.value != id }
+        return stored
     }
 
-    /// Folder tabs have an Arc-like two-step close lifecycle: first unload the
-    /// page but retain its entry, then allow explicit deletion with the x.
+    /// After the active tab closes: its split partner, the page that opened
+    /// it, the most recently used loaded tab, then any tab of the Space.
+    private func selectReplacement(partner: UUID?, opener: UUID?) {
+        let candidates = visibleTabs
+        if let preferred = [partner, opener].compactMap({ $0 }).first(where: { id in candidates.contains { $0.id == id } }) {
+            select(preferred)
+        } else if let recent = candidates.filter({ !$0.isSuspended }).max(by: { $0.lastActiveAt < $1.lastActiveAt }) {
+            select(recent.id)
+        } else if let last = candidates.last {
+            select(last.id)
+        } else {
+            requestNewTab()
+        }
+    }
+
+    /// Folder and pinned tabs have an Arc-like two-step close lifecycle: first
+    /// unload the page but retain its entry, then allow explicit deletion with the x.
     func closeSidebarTab(_ id: UUID?) {
         guard let id, let tab = tabs.first(where: { $0.id == id }) else { return }
-        guard tab.folderID != nil, activeID == id, !tab.isSuspended else {
+        if id == peekOpenerID { closePeek() }
+        guard tab.folderID != nil || tab.pinned, activeID == id, !tab.isSuspended else {
             closeTab(id, revealStartPage: activeID == id)
             return
         }
         if webPageDialog?.tabID == id { resolveWebPageDialog(false) }
-        tab.suspend()
+        tab.suspend(forced: true)
         splitPairs.removeAll { $0.contains(id) }
-        if splitID == id { splitID = nil }
-        if activeID == id {
-            activeID = nil
-        }
+        splitID = nil
+        // Switching back to this Space must not reopen the page just closed.
+        if lastActiveBySpace[tab.space] == id { lastActiveBySpace[tab.space] = nil }
+        activeID = nil
         save()
     }
-    func dismissClosedTabUndo(_ id: UUID) {
-        if closedTabUndoID == id { closedTabUndoID = nil }
+
+    /// Restores everything the last close removed. `reopenTab` resets the
+    /// undo state, so the count and the previous tab are read first.
+    func undoClosedTabs() {
+        let count = closedTabUndoCount
+        let previous = closedTabUndoActiveID
+        for _ in 0..<count {
+            if reopenTab() == nil { break }
+        }
+        if let previous, tabs.contains(where: { $0.id == previous }) { select(previous) }
+        clearClosedTabUndo()
     }
-    func clearClosedTabUndo() { closedTabUndoID = nil }
+    func dismissClosedTabUndo(_ id: UUID) {
+        if closedTabUndoID == id { clearClosedTabUndo() }
+    }
+    func clearClosedTabUndo() {
+        closedTabUndoID = nil
+        closedTabUndoCount = 1
+        closedTabUndoActiveID = nil
+    }
+
+    /// Pairs the active tab with the most recently used open tab of its own
+    /// folder, or a new tab. Pins and other folders' tabs are never borrowed,
+    /// because pairing moves the partner into the anchor's folder.
     func toggleSplit() {
         if splitID != nil { separateSplit(); return }
-        guard let current = activeID else { return }
-        if let other = visibleTabs.last(where: { $0.id != current }) { pairTabs(other.id, with: current) }
+        guard let current = activeID, let anchor = active else { return }
+        let candidates = visibleTabs.filter { $0.id != current && !$0.pinned && !$0.isSuspended && $0.folderID == anchor.folderID }
+        if let other = candidates.max(by: { $0.lastActiveAt < $1.lastActiveAt }) { pairTabs(other.id, with: current) }
         else { let added = newTab(); pairTabs(added.id, with: current) }
     }
     func navigate(_ text: String) {
@@ -1310,32 +1642,48 @@ final class BrowserModel: ObservableObject {
     }
 
     /// ⌘1–⌘8 pick a tab by position, ⌘9 jumps to the last one, matching the
-    /// convention in Safari and Chrome.
+    /// convention in Safari and Chrome. Positions follow the tab list on screen.
     func selectVisibleTab(at index: Int) {
-        let list = visibleTabs
+        let list = displayOrderedTabs
         guard !list.isEmpty else { return }
         let target = index >= 8 ? list.count - 1 : index
         guard list.indices.contains(target) else { return }
         select(list[target].id)
     }
 
-    func changeZoom(_ direction: Int) { active?.changeZoom(direction) }
-    func printActivePage() { active?.printPage() }
+    func changeZoom(_ direction: Int) { commandTarget?.changeZoom(direction) }
+    func printActivePage() { commandTarget?.printPage() }
 
     /// Saves the current page. Reachable via ⌘D and the page actions; before,
     /// bookmarks could only be created from a button buried in settings.
     func bookmarkActivePage() {
-        guard let tab = active, let url = tab.webView.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        guard let tab = commandTarget, let url = tab.webView.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let link = ImportLink(title: title.isEmpty ? (url.host ?? url.absoluteString) : title,
                               url: url.absoluteString,
                               folder: L("Meine Lesezeichen"))
         do {
             let added = try mergeImport(bookmarks: [link], history: []).0
-            notice = added > 0
-                ? L("Zu deinen Lesezeichen hinzugefügt.", "Added to your bookmarks.")
-                : L("Diese Seite ist bereits in deinen Lesezeichen.", "This page is already in your bookmarks.")
+            if added > 0 { showToast("bookmark.fill", L("Zu deinen Lesezeichen hinzugefügt.", "Added to your bookmarks.")) }
+            else { showToast("bookmark", L("Diese Seite ist bereits in deinen Lesezeichen.", "This page is already in your bookmarks.")) }
         } catch { notice = error.localizedDescription }
+    }
+
+    func copyLink(_ tab: BrowserTab?) {
+        guard let tab, !tab.url.isEmpty, !tab.isExtensionsHub else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(tab.url, forType: .string)
+        showToast("link", L("Link kopiert", "Link copied"))
+    }
+
+    func showToast(_ icon: String, _ text: String) {
+        toast = BrowserToast(id: UUID(), icon: icon, text: text)
+    }
+
+    /// Clears the toast only if it is still the one being dismissed, so a
+    /// late timer cannot remove a newer message.
+    func dismissToast(_ id: UUID) {
+        if toast?.id == id { toast = nil }
     }
 
     var activePageIsBookmarked: Bool {
@@ -1352,6 +1700,10 @@ final class BrowserModel: ObservableObject {
             else {
                 history.removeAll { $0.date >= range.start }
                 flushLibrary()
+                // Closed tabs keep URLs and back-forward lists of their own.
+                closedTabs.removeAll()
+                clearClosedTabUndo()
+                persistSession()
             }
         }
         // Reload so open pages notice that their session is gone instead of
@@ -1384,10 +1736,15 @@ final class BrowserModel: ObservableObject {
         saveTask?.cancel()
         do {
             let userTabs = tabs.filter { !agentTabIDs.contains($0.id) && !$0.isPrivate }
-            let data = try JSONEncoder().encode(StoredSession(tabs: userTabs.map(\.stored), activeID: activeID, space: space, closedTabs: closedTabs, spaces: spaces, spaceIcons: spaceIcons, spaceTones: spaceTones, folders: folders, splitPairs: splitPairs))
+            let userIDs = Set(userTabs.map(\.id))
+            let remembered = lastActiveBySpace.filter { userIDs.contains($0.value) }.mapValues(\.uuidString)
+            let data = try JSONEncoder().encode(StoredSession(tabs: userTabs.map(\.stored), activeID: activeID, space: space, closedTabs: closedTabs, spaces: spaces, spaceIcons: spaceIcons, spaceTones: spaceTones, folders: folders, splitPairs: splitPairs, lastActiveBySpace: remembered))
             try data.write(to: home.appendingPathComponent("session.json"), options: .atomic)
             return true
-        } catch { notice = "Sitzung konnte nicht gespeichert werden: \(error.localizedDescription)"; return false }
+        } catch {
+            notice = L("Sitzung konnte nicht gespeichert werden: ", "Could not save the session: ") + error.localizedDescription
+            return false
+        }
     }
     func startBridge() {
         guard bridge == nil else { return }
@@ -1396,7 +1753,12 @@ final class BrowserModel: ObservableObject {
                 guard let self else { throw YOBROError.message("Browser geschlossen") }
                 return try await self.handle(request)
             }
-            bridge = server; bridgeStatus = L("Bereit")
-        } catch { bridgeStatus = "Nicht verbunden"; notice = error.localizedDescription }
+            bridge = server
+        } catch { notice = error.localizedDescription }
     }
+}
+
+extension BrowserModel {
+    /// The toast type is also reachable through the model, where it is published.
+    typealias BrowserToast = YOBRO.BrowserToast
 }

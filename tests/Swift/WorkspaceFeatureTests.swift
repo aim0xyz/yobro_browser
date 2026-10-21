@@ -41,12 +41,41 @@ final class WorkspaceFeatureTests: XCTestCase {
         configuration.websiteDataStore = dataStore
         configuration.userContentController = contentController
 
+        let opener = model.newTab()
+        let other = model.newTab()
         let popup = model.newTab(space: model.space, webViewConfiguration: configuration, useConfigurationDirectly: true)
+        popup.openerID = opener.id
+        model.select(other.id); model.select(popup.id)
 
         XCTAssertTrue(popup.webView.configuration.websiteDataStore === dataStore)
         XCTAssertTrue(popup.webView.configuration.userContentController === contentController)
         popup.webViewDidClose(popup.webView)
         XCTAssertFalse(model.tabs.contains { $0.id == popup.id })
+        XCTAssertEqual(model.activeID, opener.id, "Closing itself returns to the page that opened it")
+        XCTAssertTrue(model.closedTabs.isEmpty, "A self-closed popup is not offered for reopening")
+        XCTAssertNil(model.closedTabUndoID)
+    }
+
+    @MainActor
+    func testScriptPopupRemembersItsOpener() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        let opener = model.newTab()
+        opener.webView.loadHTMLString("<html><body>Opener</body></html>", baseURL: URL(string: "https://popup-opener.test/"))
+        for _ in 0..<60 where opener.webView.isLoading || opener.webView.url == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        _ = model.newTab()
+        model.select(opener.id)
+        _ = try? await opener.webView.evaluateJavaScript("window.open('about:blank'); true")
+        for _ in 0..<40 where model.tabs.count < 3 { try await Task.sleep(nanoseconds: 50_000_000) }
+        let popup = try XCTUnwrap(model.tabs.last)
+        XCTAssertEqual(popup.openerID, opener.id)
+        XCTAssertEqual(model.activeID, popup.id)
+        _ = try? await popup.webView.evaluateJavaScript("window.close(); true")
+        for _ in 0..<40 where model.tabs.contains(where: { $0.id == popup.id }) { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertFalse(model.tabs.contains { $0.id == popup.id })
+        XCTAssertEqual(model.activeID, opener.id)
+        XCTAssertTrue(model.closedTabs.isEmpty)
     }
     @MainActor
     func testBrowserShellSplitLayout() async throws {

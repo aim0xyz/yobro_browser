@@ -1,38 +1,9 @@
 import SwiftUI
 import WebKit
 
-extension BrowserModel {
-    /// Opens a link in a preview over the current page, like YAB's Peek.
-    /// Nothing reaches the sidebar until the user keeps the page.
-    func peek(_ url: URL) {
-        closePeek()
-        let tab = BrowserTab(saved: StoredTab(id: UUID(), title: url.host ?? url.absoluteString, url: "", space: space, pinned: false), owner: self)
-        peekTab = tab
-        do { try tab.navigate(url.absoluteString) }
-        catch { closePeek(); notice = error.localizedDescription }
-    }
-
-    func closePeek() {
-        guard let tab = peekTab else { return }
-        peekTab = nil
-        tab.discard()
-    }
-
-    /// Keeps the previewed page as an ordinary tab, optionally beside the
-    /// page it was opened from.
-    func keepPeek(split: Bool) {
-        guard let tab = peekTab else { return }
-        peekTab = nil
-        tabs.append(tab)
-        if #available(macOS 15.4, *) { extensions.runtime.controller.didOpenTab(tab) }
-        if split, let anchor = activeID, anchor != tab.id, pairTabs(tab.id, with: anchor) { return }
-        select(tab.id)
-        save()
-    }
-}
-
 /// The previewed page floats above a dimmed page card, with its controls
-/// beside it.
+/// beside it. `peek`, `closePeek` and `keepPeek` live in BrowserModel.swift,
+/// next to the tab selection they depend on.
 struct PeekOverlay: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject var model: BrowserModel
@@ -57,7 +28,10 @@ struct PeekOverlay: View {
             .padding(.leading, 48).padding(.trailing, 12).padding(.vertical, 24)
         }
         .background {
-            Button("") { model.closePeek() }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
+            // A page dialog over the preview takes Esc first.
+            if model.webPageDialog == nil {
+                Button("") { model.closePeek() }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
+            }
         }
         .transition(.opacity.combined(with: .scale(scale: 0.98)))
         .accessibilityIdentifier("peek")
