@@ -384,6 +384,7 @@ extension BrowserModel {
         clearClosedTabUndo()
         let closedIndex = saved.closedIndex
         saved.closedIndex = nil
+        saved.closedAt = nil
         if tabs.contains(where: { $0.id == saved.id }) { saved.id = UUID() }
         let tab = BrowserTab(saved: saved, owner: self, deferLoading: !selecting)
         if let closedIndex { tabs.insert(tab, at: min(max(0, closedIndex), tabs.count)) }

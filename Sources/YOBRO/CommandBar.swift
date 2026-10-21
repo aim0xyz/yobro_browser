@@ -203,7 +203,7 @@ struct CommandBar: View {
         // The empty field lists open tabs. Not `onReceive(model.$tabs)`: it
         // resubscribes on every redraw and replays the value, so each refresh
         // caused the next one and a blank tab kept the main thread busy.
-        .onChange(of: model.tabs.map(\.id)) { _, _ in if query.isEmpty { refresh() } }
+        .onChange(of: model.tabsRevision) { _, _ in if query.isEmpty { refresh() } }
         .onReceive(NotificationCenter.default.publisher(for: .focusInlineCommandField, object: model)) { _ in
             guard inline else { return }
             focused = true

@@ -19,6 +19,9 @@ struct StoredTab: Codable, Equatable {
     /// WebKit's opaque session state: back-forward list, scroll offset and form
     /// contents.
     var interactionState: Data? = nil
+    /// When a closed tab was closed, so clearing a time range only removes the
+    /// tabs closed within it. `nil` for open tabs and older sessions.
+    var closedAt: Date? = nil
 }
 
 struct StoredSession: Codable, Equatable {
@@ -904,7 +907,10 @@ enum YOBROError: LocalizedError {
 @MainActor
 final class BrowserModel: ObservableObject {
     weak var sidebarScrollView: NSScrollView?
-    @Published var tabs: [BrowserTab] = []
+    @Published var tabs: [BrowserTab] = [] { didSet { tabsRevision &+= 1 } }
+    /// Changes with every change to `tabs`. Views compare this number instead
+    /// of building and comparing the whole list on each redraw.
+    @Published private(set) var tabsRevision = 0
     @Published var activeID: UUID?
     @Published var space = L("Persönlich") {
         didSet {
@@ -1559,6 +1565,7 @@ final class BrowserModel: ObservableObject {
         if stored {
             var saved = tab.stored
             saved.closedIndex = index
+            saved.closedAt = Date()
             closedTabs.append(saved)
         }
         if #available(macOS 15.4, *), !tab.isPrivate { extensions.runtime.controller.didCloseTab(tab) }
@@ -1712,7 +1719,9 @@ final class BrowserModel: ObservableObject {
                 history.removeAll { $0.date >= range.start }
                 flushLibrary()
                 // Closed tabs keep URLs and back-forward lists of their own.
-                closedTabs.removeAll()
+                // Ones without a closing time predate it, so their age is unknown
+                // and they go too.
+                closedTabs.removeAll { $0.closedAt.map { $0 >= range.start } ?? true }
                 clearClosedTabUndo()
                 persistSession()
             }

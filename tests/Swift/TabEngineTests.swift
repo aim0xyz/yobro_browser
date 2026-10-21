@@ -387,4 +387,36 @@ final class TabEngineTests: XCTestCase {
         }
         XCTAssertEqual(value, "framed")
     }
+
+    func testClearingARangeKeepsTabsClosedBeforeIt() async throws {
+        let model = makeModel()
+        let old = model.newTab(url: "https://old.example.invalid/")
+        let recent = model.newTab(url: "https://recent.example.invalid/")
+        model.newTab()
+        model.closeTab(old.id)
+        model.closeTab(recent.id)
+        // Pretend the first one was closed two days ago, and add an entry from
+        // a session written before closing times existed.
+        let oldIndex = try XCTUnwrap(model.closedTabs.firstIndex { $0.id == old.id })
+        model.closedTabs[oldIndex].closedAt = Date().addingTimeInterval(-2 * 86_400)
+        var legacy = model.closedTabs[oldIndex]
+        legacy.id = UUID(); legacy.closedAt = nil; legacy.url = "https://legacy.example.invalid/"
+        model.closedTabs.insert(legacy, at: 0)
+
+        await model.clearWebsiteData(.day, includingHistory: true)
+
+        XCTAssertEqual(model.closedTabs.map(\.url), ["https://old.example.invalid/"])
+        let reopened = try XCTUnwrap(model.reopenTab())
+        XCTAssertNil(reopened.stored.closedAt, "An open tab carries no closing time")
+    }
+
+    func testTabsRevisionFollowsTheTabList() {
+        let model = makeModel()
+        let start = model.tabsRevision
+        let tab = model.newTab()
+        XCTAssertGreaterThan(model.tabsRevision, start)
+        let afterOpen = model.tabsRevision
+        model.closeTab(tab.id, revealStartPage: true)
+        XCTAssertGreaterThan(model.tabsRevision, afterOpen)
+    }
 }
