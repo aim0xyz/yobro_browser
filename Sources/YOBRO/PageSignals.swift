@@ -39,6 +39,12 @@ final class PageSignals: ObservableObject {
         webView?.pauseAllMediaPlayback(completionHandler: nil)
     }
 
+    func reset() {
+        audibleDocuments.removeAll()
+        if audible { audible = false }
+        if !hoveredLink.isEmpty { hoveredLink = "" }
+    }
+
     func setHoveredLink(_ href: String) {
         // A script URL says nothing useful about where a click leads.
         let link = href.lowercased().hasPrefix("javascript:") ? "" : href

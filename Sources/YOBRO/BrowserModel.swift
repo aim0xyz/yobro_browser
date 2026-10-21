@@ -577,6 +577,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// would otherwise reset a counter on every successful load.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard !isExtensionsHub else { return }
+        // A crashed page sends no pagehide, so its sound and link state would stay.
+        (webView as? AppearanceWebView)?.signals.reset()
         let reloadedRecently = lastAutomaticReload.map { Date().timeIntervalSince($0) <= 60 } ?? false
         guard !isSuspended, !url.isEmpty, !reloadedRecently else {
             failure = PageFailure(title: L("Die Seite wurde beendet.", "The page stopped responding."),
@@ -1696,7 +1698,7 @@ final class BrowserModel: ObservableObject {
     }
 
     var activePageIsBookmarked: Bool {
-        guard let url = active?.webView.url?.absoluteString else { return false }
+        guard let url = commandTarget?.webView.url?.absoluteString else { return false }
         return bookmarks.contains { $0.url == url }
     }
 
