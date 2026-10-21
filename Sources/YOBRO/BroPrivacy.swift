@@ -21,6 +21,7 @@ final class BroPrivacySession {
         pattern: #"(?i)\b(?:[\p{L}.-]+\s+){1,6}\d{1,4}[a-z]?,?\s+\d{5}\s+[\p{L}.-]+(?:\s+[\p{L}.-]+){0,3}\b"#)
     private static let credential = try! NSRegularExpression(
         pattern: #"(?i)\b(?:passwort|password|kennwort|pin|api[-_ ]?key|token|secret|zugangscode|login|benutzername|username)\b\s*(?:ist|lautet|heißt|:|=)\s*[\"'“]?([^\s,;\"'”]{3,})"#)
+    private static let cardNumber = try! NSRegularExpression(pattern: #"\b(?:\d[ -]?){12,18}\d\b"#)
     private static let detector = try? NSDataDetector(types:
         NSTextCheckingResult.CheckingType.address.rawValue |
         NSTextCheckingResult.CheckingType.phoneNumber.rawValue)
@@ -65,7 +66,15 @@ final class BroPrivacySession {
             let value = match.range(at: 1)
             return value.location == NSNotFound ? nil : value
         }
-        ranges += Self.detector?.matches(in: text, range: full).map(\.range) ?? []
+        // Order and reference numbers look like cards too; only a valid
+        // checksum marks a real one.
+        ranges += Self.cardNumber.matches(in: text, range: full).map(\.range)
+            .filter { Self.passesLuhn(source.substring(with: $0)) }
+        // Phone numbers have at most 15 digits, so longer runs are left to
+        // the card rule above.
+        ranges += Self.detector?.matches(in: text, range: full).filter { match in
+            match.resultType != .phoneNumber || source.substring(with: match.range).filter { $0.isASCII && $0.isWholeNumber }.count <= 15
+        }.map(\.range) ?? []
         ranges += knownSecrets?.matches(in: text, range: full).map(\.range) ?? []
         let ordered = ranges.filter { $0.length > 0 }.sorted {
             $0.location == $1.location ? $0.length > $1.length : $0.location < $1.location
@@ -93,9 +102,25 @@ final class BroPrivacySession {
         return segments.isEmpty ? [BroTextSegment(text: text, sensitive: false)] : segments
     }
 
+    static func passesLuhn(_ candidate: String) -> Bool {
+        let digits = candidate.compactMap { $0.isASCII ? $0.wholeNumberValue : nil }
+        guard (13...19).contains(digits.count) else { return false }
+        let sum = digits.reversed().enumerated().reduce(0) { total, item in
+            let doubled = item.offset % 2 == 1 ? item.element * 2 : item.element
+            return total + (doubled > 9 ? doubled - 9 : doubled)
+        }
+        return sum % 10 == 0
+    }
+
     func redact(_ text: String) -> String {
+        var changed = false
+        return redact(text, changed: &changed)
+    }
+
+    private func redact(_ text: String, changed: inout Bool) -> String {
         segments(in: text).map { segment in
             guard segment.sensitive else { return segment.text }
+            changed = true
             if let existing = placeholders[segment.text] { return existing }
             let marker = "[[YB_PRIVATE_\(nonce)_\(placeholders.count + 1)]]"
             placeholders[segment.text] = marker
@@ -111,13 +136,21 @@ final class BroPrivacySession {
     }
 
     func redactJSON(_ value: Any) -> Any {
+        var changed = false
+        return redactJSON(value, changed: &changed)
+    }
+
+    private func redactJSON(_ value: Any, changed: inout Bool) -> Any {
         if let text = value as? String {
-            if let nested = transformEmbeddedJSON(text, restoring: false) { return nested }
-            return redact(text)
+            if let nested = transformEmbeddedJSON(text, restoring: false) {
+                if nested != text { changed = true }
+                return nested
+            }
+            return redact(text, changed: &changed)
         }
-        if let array = value as? [Any] { return array.map(redactJSON) }
+        if let array = value as? [Any] { return array.map { redactJSON($0, changed: &changed) } }
         if let object = value as? [String: Any] {
-            return object.mapValues { redactJSON($0) }
+            return object.mapValues { redactJSON($0, changed: &changed) }
         }
         return value
     }
@@ -155,12 +188,26 @@ final class BroPrivacySession {
         return value
     }
 
+    /// Re-serializes embedded JSON only when a value inside actually changes,
+    /// so answers and page snapshots without private data keep their bytes.
     private func transformEmbeddedJSON(_ text: String, restoring: Bool) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("{") || trimmed.hasPrefix("["),
-              let parsed = try? JSONSerialization.jsonObject(with: Data(text.utf8)) else { return nil }
-        let changed = restoring ? restoreJSON(parsed) : redactJSON(parsed)
-        guard let data = try? JSONSerialization.data(withJSONObject: changed),
+        guard trimmed.hasPrefix("{") || trimmed.hasPrefix("[") else { return nil }
+        // Placeholders contain nothing JSON escapes, so a plain search is exact.
+        if restoring, !originals.keys.contains(where: { text.contains($0) }) { return nil }
+        guard let parsed = try? JSONSerialization.jsonObject(with: Data(text.utf8)) else { return nil }
+        let transformed: Any
+        if restoring {
+            transformed = restoreJSON(parsed)
+        } else {
+            // Checked on the parsed strings: in the raw text an escaped "\n" or
+            // "\/" sits right before a secret and hides it from the word-boundary
+            // rules.
+            var changed = false
+            transformed = redactJSON(parsed, changed: &changed)
+            if !changed { return text }
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: transformed, options: [.withoutEscapingSlashes]),
               let result = String(data: data, encoding: .utf8) else { return nil }
         return result
     }

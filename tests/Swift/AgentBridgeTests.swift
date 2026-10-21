@@ -87,4 +87,22 @@ final class AgentBridgeTests: XCTestCase {
         let submitted = try await js("submissions", view) as? Int
         XCTAssertEqual(submitted, 1)
     }
+
+    func testSecretFieldValuesAreRedactedAndGuardedFillIsRefused() async throws {
+        let view = try await fixture("<input aria-label='Card' autocomplete='cc-number' value='4111111111111111'><input aria-label='Secret' type='password' value='hunter2'><input aria-label='Code' name='otp_code' value='123456'><input aria-label='CVC' id='card-cvc' value='737'><input aria-label='Name' value='Laura'>")
+        let values = try await js("JSON.stringify(__yobro.snapshot().elements.map(e => e.value))", view) as? String
+        XCTAssertEqual(values, #"["[redacted]","[redacted]","[redacted]","[redacted]","Laura"]"#)
+        let refused = try await js("""
+        (() => { const p = __yobro.snapshot(); try { __yobro.act({action:'fill',ref:p.elements[1].ref,document:p.document,value:'typed',guarded:true}); return ''; }
+        catch (e) { return e.message; } })()
+        """, view) as? String
+        XCTAssertEqual(refused, "Passwords and payment fields must be entered by the user.")
+        let unchanged = try await js("document.querySelector('input[type=password]').value", view) as? String
+        XCTAssertEqual(unchanged, "hunter2")
+        // The control socket's unguarded fill keeps working, and guarded fills of ordinary fields too.
+        _ = try await js("(() => { const p = __yobro.snapshot(); __yobro.act({action:'fill',ref:p.elements[1].ref,document:p.document,value:'typed'}); return true; })()", view)
+        _ = try await js("(() => { const p = __yobro.snapshot(); __yobro.act({action:'fill',ref:p.elements[4].ref,document:p.document,value:'Max',guarded:true}); return true; })()", view)
+        let filled = try await js("[document.querySelector('input[type=password]').value, document.querySelectorAll('input')[4].value].join('|')", view) as? String
+        XCTAssertEqual(filled, "typed|Max")
+    }
 }

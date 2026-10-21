@@ -13,9 +13,9 @@ final class ControlBridge: @unchecked Sendable {
 
     init(path: String, handler: @escaping @MainActor ([String: Any]) async throws -> [String: Any]) throws {
         self.path = path; self.handler = handler
-        guard path.utf8.count < 104 else { throw YOBROError.message("Socket-Pfad zu lang. YOBRO_HOME kürzer setzen.") }
+        guard path.utf8.count < 104 else { throw YOBROError.message(L("Socket-Pfad zu lang. YOBRO_HOME kürzer setzen.", "Socket path too long. Set a shorter YOBRO_HOME.")) }
         descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { throw YOBROError.message("Socket konnte nicht erstellt werden.") }
+        guard descriptor >= 0 else { throw YOBROError.message(L("Socket konnte nicht erstellt werden.", "Could not create the socket.")) }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
@@ -28,14 +28,14 @@ final class ControlBridge: @unchecked Sendable {
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         Darwin.close(probe)
-        if existing == 0 { Darwin.close(descriptor); throw YOBROError.message("Eine andere YoBro-Instanz nutzt bereits diese Schnittstelle.") }
+        if existing == 0 { Darwin.close(descriptor); throw YOBROError.message(L("Eine andere YoBro-Instanz nutzt bereits diese Schnittstelle.", "Another YoBro instance is already using this interface.")) }
         unlink(path)
         let bound = withUnsafePointer(to: &address) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        guard bound == 0 else { Darwin.close(descriptor); throw YOBROError.message("Socket konnte nicht gebunden werden: \(String(cString: strerror(errno)))") }
+        guard bound == 0 else { Darwin.close(descriptor); throw YOBROError.message(L("Socket konnte nicht gebunden werden: ", "Could not bind the socket: ") + String(cString: strerror(errno))) }
         chmod(path, 0o600)
-        guard listen(descriptor, 8) == 0 else { Darwin.close(descriptor); unlink(path); throw YOBROError.message("Socket konnte nicht gestartet werden.") }
+        guard listen(descriptor, 8) == 0 else { Darwin.close(descriptor); unlink(path); throw YOBROError.message(L("Socket konnte nicht gestartet werden.", "Could not start the socket.")) }
         let fd = descriptor
         queue.async { [weak self] in
             while true {
@@ -138,25 +138,40 @@ extension BrowserModel {
         _ = try await evaluate(String(contentsOf: resource), tab: tab)
     }
     func readTab(_ tab: BrowserTab) async throws -> [String: Any] {
+        // Restored and hibernated tabs hold no page until they are shown;
+        // reading them as they are would return a blank document.
+        if tab.isSuspended { tab.resume() }
+        else if tab.webView.url == nil, !tab.url.isEmpty { tab.loadPersistedContent() }
         try await waitForLoad(tab)
         try await prepare(tab)
         let value = try await evaluate("globalThis.__yobro.snapshot()", tab: tab)
-        record("read", tab.webView.url?.host ?? "Seite gelesen", in: tab.space)
+        let expectsWebPage = URL(string: tab.url).map { ["http", "https"].contains($0.scheme?.lowercased() ?? "") } ?? false
+        if expectsWebPage, tab.webView.url == nil || tab.webView.url?.scheme == "about" {
+            throw YOBROError.message("This tab is not loaded yet; ask the user to open it.")
+        }
+        record("read", tab.webView.url?.host ?? L("Seite gelesen", "Page read"), in: tab.space)
         return ["tab": tabInfo(tab), "page": value]
     }
-    func actOnTab(_ tab: BrowserTab, action: String, ref: String, document: String, value: String? = nil, key: String? = nil) async throws -> [String: Any] {
+    /// - Parameter guarded: refuses to type into password, card and one-time
+    ///   code fields. The in-app assistant sets it; the control socket keeps
+    ///   its existing behaviour.
+    func actOnTab(_ tab: BrowserTab, action: String, ref: String, document: String, value: String? = nil, key: String? = nil, guarded: Bool = false) async throws -> [String: Any] {
         try await prepare(tab)
+        // Stop cancels the run while the bridge loads; a new run must not
+        // inherit this stale action.
+        try Task.checkCancellation()
         guard agentOperationAllowed else { throw YOBROError.message("Agent operation was paused.") }
         let args: [String: Any] = [
             "action": action,
             "ref": ref,
             "document": document,
             "value": value ?? "",
-            "key": key ?? "Enter"
+            "key": key ?? "Enter",
+            "guarded": guarded
         ]
         let json = String(data: try JSONSerialization.data(withJSONObject: args), encoding: .utf8)!
         let result = try await evaluate("globalThis.__yobro.act(\(json))", tab: tab)
-        record(action, "\(ref) · \(tab.webView.url?.host ?? "Seite")", in: tab.space)
+        record(action, "\(ref) · \(tab.webView.url?.host ?? L("Seite", "Page"))", in: tab.space)
         return ["tab": tabInfo(tab), "action": result, "next": "Read again to verify the outcome; pages may update asynchronously."]
     }
     func scrollTab(_ tab: BrowserTab, amount: Int) async throws -> [String: Any] {
@@ -227,10 +242,11 @@ extension BrowserModel {
         }
         if command == "downloads" {
             let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-            return ["downloads": try JSONSerialization.jsonObject(with: encoder.encode(downloads.entries)), "directory": downloads.directory.path]
+            // Downloads from private tabs are never handed out.
+            return ["downloads": try JSONSerialization.jsonObject(with: encoder.encode(downloads.persistentEntries)), "directory": downloads.directory.path]
         }
         if command == "cancel-download" {
-            guard let value = request["id"] as? String, let id = UUID(uuidString: value), let item = downloads.entries.first(where: { $0.id == id }) else { throw YOBROError.message("Unbekannter Download.") }
+            guard let value = request["id"] as? String, let id = UUID(uuidString: value), let item = downloads.persistentEntries.first(where: { $0.id == id }) else { throw YOBROError.message("Unbekannter Download.") }
             guard item.state == "downloading" else { throw YOBROError.message("Download ist nicht aktiv.") }
             downloads.cancel(id); record(command, item.name); return ["cancelRequested": value]
         }
@@ -259,7 +275,7 @@ extension BrowserModel {
             tab.showFind = !query.isEmpty
             let found = await tab.find(query, backwards: request["backwards"] as? Bool ?? false)
             if let error = tab.findError { throw YOBROError.message(error) }
-            record(command, tab.webView.url?.host ?? "Seitensuche")
+            record(command, tab.webView.url?.host ?? L("Seitensuche", "Find on page"))
             return ["tab": tabInfo(tab), "found": found, "query": query]
         case "duplicate":
             let duplicate = newAgentTab(url: tab.url)
@@ -268,7 +284,7 @@ extension BrowserModel {
             guard let value = request["url"] as? String, let url = URL(string: value), ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { throw YOBROError.message("Gültige HTTP- oder HTTPS-Downloadadresse erforderlich.") }
             let download = await tab.webView.startDownload(using: URLRequest(url: url))
             downloads.track(download)
-            record(command, url.host ?? "Datei")
+            record(command, url.host ?? L("Datei", "File"))
             return ["started": true, "next": "Use downloads to check progress and retrieve the final file path."]
         case "focus": agentTabID = tab.id
         case "close": closeTab(tab.id)

@@ -76,4 +76,43 @@ final class BroPrivacyTests: XCTestCase {
         XCTAssertFalse((function["arguments"] as? String ?? "").contains("test"))
         XCTAssertEqual(protected[2]["tool_call_id"] as? String, "call")
     }
+
+    func testRestoringJSONWithoutPlaceholdersKeepsItsBytes() {
+        let privacy = BroPrivacySession()
+        _ = privacy.redact("Schreibe an team@example.com")
+        let pretty = "{\n  \"url\" : \"https://example.com/a/b\",\n  \"price\" : 1.50\n}"
+        XCTAssertEqual(privacy.restoreJSON(pretty) as? String, pretty)
+        XCTAssertEqual(privacy.redactJSON(pretty) as? String, pretty)
+    }
+
+    func testRestoredJSONKeepsSlashesUnescaped() throws {
+        let privacy = BroPrivacySession()
+        let marker = privacy.redact("team@example.com")
+        let json = "{\"to\":\"\(marker)\",\"url\":\"https://example.com/a/b\"}"
+        let restored = try XCTUnwrap(privacy.restoreJSON(json) as? String)
+        XCTAssertTrue(restored.contains("https://example.com/a/b"))
+        XCTAssertFalse(restored.contains(#"\/"#))
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(restored.utf8)) as? [String: String])
+        XCTAssertEqual(parsed["to"], "team@example.com")
+    }
+
+    func testSecretAfterEscapedLineBreakOrSlashIsRedactedInJSON() throws {
+        let privacy = BroPrivacySession(knownSecrets: ["Zebra-Secret-4417"])
+        // Default serialization escapes "/" as well, like many page snapshots.
+        let data = try JSONSerialization.data(withJSONObject: ["text": "Intro\nZebra-Secret-4417 here", "path": "a/Zebra-Secret-4417"])
+        let redacted = try XCTUnwrap(privacy.redactJSON(String(decoding: data, as: UTF8.self)) as? String)
+        XCTAssertFalse(redacted.contains("Zebra-Secret-4417"))
+        XCTAssertNotNil(try JSONSerialization.jsonObject(with: Data(redacted.utf8)))
+    }
+
+    func testCardNumbersNeedAValidChecksum() {
+        let privacy = BroPrivacySession()
+        let card = privacy.redact("Karte 4111 1111 1111 1111 bitte")
+        XCTAssertFalse(card.contains("4111 1111 1111 1111"))
+        XCTAssertEqual(privacy.restore(card), "Karte 4111 1111 1111 1111 bitte")
+        XCTAssertFalse(privacy.redact("Karte 4111111111111111").contains("4111111111111111"))
+        XCTAssertEqual(privacy.redact("Nummer 1234 5678 9012 3456 bitte"), "Nummer 1234 5678 9012 3456 bitte")
+        XCTAssertTrue(BroPrivacySession.passesLuhn("4111 1111 1111 1111"))
+        XCTAssertFalse(BroPrivacySession.passesLuhn("1234 5678 9012 3456"))
+    }
 }

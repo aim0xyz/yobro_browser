@@ -36,6 +36,16 @@
     }
     return false;
   };
+  // Passwords, card data and one-time codes stay with the user: their values
+  // are never read out, and the in-app assistant may not type into them.
+  const secretAutocomplete = /^(cc-number|cc-csc|cc-exp.*|one-time-code|current-password|new-password)$/;
+  const secretName = /card[-_ ]?(number|num|no)|cc[-_ ]?(number|num)|cvc|cvv|csc|security[-_ ]?code|(^|[^a-z])otp|one[-_ ]?time/i;
+  const secretField = el => {
+    if (el.type === 'password') return true;
+    const tokens = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
+    if (tokens.some(token => secretAutocomplete.test(token))) return true;
+    return secretName.test(el.getAttribute('name') || '') || secretName.test(el.id || '');
+  };
   function all(root = document) {
     const elements = [];
     for (const el of root.querySelectorAll('*')) {
@@ -77,7 +87,7 @@
       elements: interactive.slice(0, 500).map(el => ({
         ref: ref(el), tag: el.tagName.toLowerCase(), role: el.getAttribute('role'), label: label(el),
         type: el.getAttribute('type'), href: el.href || null,
-        value: el.type === 'password' ? '[redacted]' : (el.value ?? (el.isContentEditable ? el.innerText : null)),
+        value: secretField(el) ? '[redacted]' : (el.value ?? (el.isContentEditable ? el.innerText : null)),
         disabled: disabled(el), checked: typeof el.checked === 'boolean' ? el.checked : null,
         options: el.tagName === 'SELECT' ? [...el.options].map(o => ({value: o.value, label: o.text})) : undefined
       })),
@@ -103,6 +113,7 @@
       try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (_) {}
       el.click();
     } else if (request.action === 'fill') {
+      if (request.guarded && secretField(el)) throw new Error('Passwords and payment fields must be entered by the user.');
       if (el.readOnly) throw new Error('Field is read-only.');
       el.focus();
       if (el.isContentEditable) {

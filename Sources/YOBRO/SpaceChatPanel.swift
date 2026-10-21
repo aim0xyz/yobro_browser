@@ -9,20 +9,22 @@ struct SpaceChatPanel: View {
     @State private var chatScrollTask: Task<Void, Never>?
     @State private var freeModelsFirst = false
 
-    private var rows: [SpaceChatEntry] { chat.entries.filter { $0.space == browser.space } }
     private var draft: Binding<String> {
         Binding(get: { chat.drafts[browser.space] ?? "" }, set: { chat.drafts[browser.space] = $0 })
     }
     private var canSend: Bool {
-        chat.isConfigured && !chat.running && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        chat.isConfigured && !chat.running && !chat.historyUnavailable
+            && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
+        let rows = chat.entries.filter { $0.space == browser.space }
         VStack(spacing: 0) {
             header
             VStack(spacing: 10) {
                 if !chat.isConfigured { connectionPrompt }
-                conversation
+                if chat.historyUnavailable { historyRecovery }
+                conversation(rows)
                 if let error = chat.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11)).foregroundStyle(.orange).lineLimit(3)
@@ -88,6 +90,20 @@ struct SpaceChatPanel: View {
         .background(YOBROTheme.field, in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private var historyRecovery: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L("Verlauf konnte nicht geladen werden.", "Chat history could not be loaded."), systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
+            Text(L("Die beschädigte Datei bleibt erhalten und wird beiseitegelegt.", "The damaged file is kept and moved aside."))
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button(L("Neuen Verlauf starten", "Start new history")) { chat.resetCorruptHistory() }
+                .buttonStyle(YOBROPopupButtonStyle(prominent: true))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(YOBROTheme.field, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var connectionSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L("Modell", "Model")).font(.system(size: 15, weight: .semibold))
@@ -98,7 +114,7 @@ struct SpaceChatPanel: View {
             if ChatProviderPreset.matching(chat.connection.endpoint) == .openRouter {
                 openRouterSettings
             } else {
-                TextField(L("Chat-Completions-Endpunkt", "Chat Completions endpoint"), text: $chat.connection.endpoint)
+                TextField(L("Chat-Completions-Endpunkt", "Chat Completions endpoint"), text: Binding(get: { chat.connection.endpoint }, set: { chat.setEndpoint($0) }))
                 Text(L("Beispiel: https://anbieter.example/v1/chat/completions oder ein lokaler Server.", "Example: https://provider.example/v1/chat/completions or a local server."))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                 TextField(L("Modellname", "Model name"), text: $chat.connection.model)
@@ -123,13 +139,19 @@ struct SpaceChatPanel: View {
     @ViewBuilder
     private var openRouterSettings: some View {
         if chat.apiKey.isEmpty {
-            Button {
-                Task { await chat.connectOpenRouter() }
-            } label: {
-                Label(chat.loadingOpenRouterModels ? L("OpenRouter wird geöffnet …", "Opening OpenRouter…") : L("Mit OpenRouter verbinden", "Connect with OpenRouter"), systemImage: "person.crop.circle.badge.checkmark")
+            HStack {
+                Button {
+                    chat.startOpenRouterConnect()
+                } label: {
+                    Label(chat.loadingOpenRouterModels ? L("OpenRouter wird geöffnet …", "Opening OpenRouter…") : L("Mit OpenRouter verbinden", "Connect with OpenRouter"), systemImage: "person.crop.circle.badge.checkmark")
+                }
+                .buttonStyle(YOBROPopupButtonStyle(prominent: true))
+                .disabled(chat.loadingOpenRouterModels)
+                if chat.loadingOpenRouterModels {
+                    Button(L("Abbrechen", "Cancel")) { chat.cancelOpenRouterConnect() }
+                        .buttonStyle(YOBROPopupButtonStyle())
+                }
             }
-            .buttonStyle(YOBROPopupButtonStyle(prominent: true))
-            .disabled(chat.loadingOpenRouterModels)
         } else {
             HStack {
                 Button(L("Trennen", "Disconnect")) { chat.disconnectOpenRouter() }
@@ -169,16 +191,16 @@ struct SpaceChatPanel: View {
         )
     }
 
-    private var conversation: some View {
+    private func conversation(_ rows: [SpaceChatEntry]) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // Chat rows are persisted and bounded by the conversation use
-                // case. Keeping them realized avoids an AppKit/SwiftUI lazy
+                // The store keeps at most SpaceChatStore.rowLimit unsaved rows
+                // per Space. Keeping them realized avoids an AppKit/SwiftUI lazy
                 // scroll bug where removing the thinking row can leave the
                 // viewport beyond the content after a second response.
                 VStack(spacing: 10) {
                     if rows.isEmpty { emptyState }
-                    ForEach(rows) { entry in ChatEntryBubble(entry: entry) }
+                    ForEach(rows) { entry in ChatEntryBubble(entry: entry) { browser.peek($0) } }
                     if chat.running {
                         AgentThinkingBubble()
                             .id("agent-thinking")
@@ -221,7 +243,7 @@ struct SpaceChatPanel: View {
             if chat.isConfigured {
                 HStack(spacing: 6) {
                     suggestion(L("Diese Seite zusammenfassen", "Summarize this page"))
-                    suggestion(L("Tabs ordnen", "Sort my tabs"))
+                    suggestion(L("Was steht in meinen Tabs?", "What's in my tabs?"))
                 }
             }
         }.frame(maxWidth: 260).padding(.vertical, 40)
@@ -347,11 +369,27 @@ private struct AgentThinkingBubble: View {
     }
 }
 
+/// Assistant replies use inline Markdown: emphasis, code and links. Block
+/// syntax such as lists stays as typed, with its line breaks.
+enum ChatMarkdown {
+    static func attributed(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}
+
 private struct ChatEntryBubble: View {
     let entry: SpaceChatEntry
+    let openLink: (URL) -> Void
+    private let rendered: AttributedString
     @State private var copied = false
     @State private var copyResetTask: Task<Void, Never>?
     private var isUser: Bool { entry.kind == "user" }
+
+    init(entry: SpaceChatEntry, openLink: @escaping (URL) -> Void) {
+        self.entry = entry
+        self.openLink = openLink
+        rendered = entry.kind == "assistant" ? ChatMarkdown.attributed(entry.text) : AttributedString()
+    }
 
     var body: some View {
         Group {
@@ -365,7 +403,13 @@ private struct ChatEntryBubble: View {
                 }
             case "assistant":
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(entry.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(rendered).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        // Links from the model open in a preview, and only web links.
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return .discarded }
+                            openLink(url)
+                            return .handled
+                        })
                     Button(action: copy) {
                         Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 10))
                             .foregroundStyle(ink.opacity(0.5)).frame(width: 24, height: 22)

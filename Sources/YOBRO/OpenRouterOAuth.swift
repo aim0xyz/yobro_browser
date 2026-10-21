@@ -45,6 +45,18 @@ enum OpenRouterOAuth {
         return code
     }
 
+    /// The `error` OpenRouter sends back when the user denies access.
+    static func callbackError(from request: String) -> String? {
+        guard let line = request.components(separatedBy: "\r\n").first else { return nil }
+        let fields = line.split(separator: " ")
+        guard fields.count == 3, fields[0] == "GET",
+              let components = URLComponents(string: "http://127.0.0.1\(fields[1])"),
+              components.path == "/openrouter/callback",
+              let error = components.queryItems?.first(where: { $0.name == "error" })?.value,
+              !error.isEmpty else { return nil }
+        return String(error.prefix(200))
+    }
+
     static func base64URL(_ data: Data) -> String {
         data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
@@ -61,10 +73,16 @@ enum OpenRouterOAuth {
         let verifier = try randomToken()
         let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         let receiver = try OpenRouterCallbackReceiver()
-        let callback = try await receiver.start()
-        let authorizationURL = try authorizationURL(callback: callback, challenge: challenge)
-        _ = await MainActor.run { NSWorkspace.shared.open(authorizationURL) }
-        let code = try await receiver.waitForCode()
+        // Cancelling the sign-in stops the listener instead of waiting forever
+        // for a browser that never calls back.
+        let code = try await withTaskCancellationHandler {
+            let callback = try await receiver.start()
+            let address = try Self.authorizationURL(callback: callback, challenge: challenge)
+            _ = await MainActor.run { NSWorkspace.shared.open(address) }
+            return try await receiver.waitForCode()
+        } onCancel: {
+            receiver.cancel()
+        }
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/auth/keys")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -115,42 +133,94 @@ enum OpenRouterOAuth {
     }
 }
 
-private final class OpenRouterCallbackReceiver: @unchecked Sendable {
+/// A one-shot loopback listener for the OAuth redirect. All state lives on
+/// `queue`; each continuation is resumed at most once, so a late listener
+/// state change cannot crash the sign-in.
+final class OpenRouterCallbackReceiver: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "yobro.openrouter.oauth")
-    private var continuation: CheckedContinuation<String, Error>?
-    private var received: Result<String, Error>?
-    private var completed = false
+    private let timeout: TimeInterval
+    private var startContinuation: CheckedContinuation<URL, Error>?
+    private var codeContinuation: CheckedContinuation<String, Error>?
+    private var result: Result<String, Error>?
+    private var timer: DispatchWorkItem?
 
-    init() throws {
+    init(timeout: TimeInterval = 300) throws {
+        self.timeout = timeout
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
         listener = try NWListener(using: parameters, on: .any)
     }
 
     func start() async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            listener.stateUpdateHandler = { [weak self] status in
-                guard let self else { return }
-                switch status {
-                case .ready:
-                    guard let port = self.listener.port else { return }
-                    continuation.resume(returning: URL(string: "http://127.0.0.1:\(port.rawValue)/openrouter/callback")!)
-                case .failed(let error): continuation.resume(throwing: error)
-                default: break
+        listener.stateUpdateHandler = { [weak self] state in self?.update(state) }
+        listener.newConnectionHandler = { [weak self] in self?.receive($0) }
+        return try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                if let result = self.result {
+                    continuation.resume(throwing: result.failure ?? CancellationError())
+                    return
                 }
+                self.startContinuation = continuation
+                self.listener.start(queue: self.queue)
+                self.scheduleTimeout()
             }
-            listener.newConnectionHandler = { [weak self] in self?.receive($0) }
-            listener.start(queue: queue)
         }
+    }
+
+    private func scheduleTimeout() {
+        let timer = DispatchWorkItem { [weak self] in
+            self?.finish(.failure(YOBROError.message(L("OpenRouter-Anmeldung abgelaufen.", "OpenRouter sign-in timed out."))))
+        }
+        self.timer = timer
+        queue.asyncAfter(deadline: .now() + timeout, execute: timer)
     }
 
     func waitForCode() async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                if let received = self.received { continuation.resume(with: received) }
-                else { self.continuation = continuation }
+                if let result = self.result { continuation.resume(with: result) }
+                else { self.codeContinuation = continuation }
             }
+        }
+    }
+
+    func cancel() { finish(.failure(CancellationError())) }
+
+    /// Ends the sign-in. Only the first call counts; it stops the listener and
+    /// resumes whichever caller is waiting.
+    func finish(_ result: Result<String, Error>) {
+        queue.async {
+            guard self.result == nil else { return }
+            self.result = result
+            self.timer?.cancel(); self.timer = nil
+            self.listener.cancel()
+            if let start = self.startContinuation {
+                self.startContinuation = nil
+                start.resume(throwing: result.failure ?? CancellationError())
+            }
+            if let code = self.codeContinuation {
+                self.codeContinuation = nil
+                code.resume(with: result)
+            }
+        }
+    }
+
+    private func update(_ state: NWListener.State) {
+        switch state {
+        case .ready:
+            guard let start = startContinuation else { return }
+            guard let port = listener.port else {
+                finish(.failure(YOBROError.message(L("OpenRouter-Anmeldung konnte nicht starten.", "OpenRouter sign-in could not start."))))
+                return
+            }
+            startContinuation = nil
+            start.resume(returning: URL(string: "http://127.0.0.1:\(port.rawValue)/openrouter/callback")!)
+        case .failed(let error):
+            finish(.failure(error))
+        case .cancelled:
+            finish(.failure(CancellationError()))
+        default: break
         }
     }
 
@@ -173,18 +243,25 @@ private final class OpenRouterCallbackReceiver: @unchecked Sendable {
             guard let line = String(data: data[..<lineEnd.lowerBound], encoding: .utf8) else { connection.cancel(); return }
             let request = line + "\r\n"
             let code = OpenRouterOAuth.callbackCode(from: request)
-            let html = code == nil ? "Invalid OpenRouter callback. You can close this tab." : "OpenRouter is connected to YoBro. You can close this tab."
+            let failure = code == nil ? OpenRouterOAuth.callbackError(from: request) : nil
+            let html = code != nil ? "OpenRouter is connected to YoBro. You can close this tab."
+                : failure != nil ? "OpenRouter sign-in was not completed. You can close this tab."
+                : "Invalid OpenRouter callback. You can close this tab."
             let body = Data(html.utf8)
             let status = code == nil ? "400 Bad Request" : "200 OK"
             let response = Data("HTTP/1.1 \(status)\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
             connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
-            guard let code, !self.completed else { return }
-            self.completed = true
-            self.listener.cancel()
-            let result: Result<String, Error> = .success(code)
-            if let continuation = self.continuation { continuation.resume(with: result) }
-            else { self.received = result }
-            self.continuation = nil
+            if let code { self.finish(.success(code)) }
+            else if let failure {
+                self.finish(.failure(YOBROError.message(L("OpenRouter-Anmeldung fehlgeschlagen: ", "OpenRouter sign-in failed: ") + failure)))
+            }
         }
+    }
+}
+
+private extension Result {
+    var failure: Failure? {
+        if case .failure(let error) = self { return error }
+        return nil
     }
 }
