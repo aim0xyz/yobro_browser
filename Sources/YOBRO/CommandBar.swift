@@ -131,6 +131,9 @@ struct CommandBar: View {
     var inline = false
     @State private var query = ""
     @State private var selected = 0
+    /// The row under the pointer. It only shows; the keyboard selection stays
+    /// put, so a pointer resting over the list never changes what Return opens.
+    @State private var hovered: Int?
     /// The suggestions are computed once per query, not on every redraw.
     @State private var list: [CommandSuggestion] = []
     /// Whether each row starts a new section and shows its heading.
@@ -165,8 +168,11 @@ struct CommandBar: View {
                                         .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 6)
                                         .accessibilityAddTraits(.isHeader)
                                 }
-                                Button { selected = index; run() } label: { row(suggestion, highlighted: index == selected) }
+                                Button { selected = index; run() } label: { row(suggestion, highlighted: index == selected, hovering: index == hovered) }
                                     .buttonStyle(.plain)
+                                    .onHover { inside in
+                                        if inside { hovered = index } else if hovered == index { hovered = nil }
+                                    }
                                     .accessibilityElement(children: .ignore)
                                     .accessibilityLabel(spokenLabel(suggestion))
                                     .accessibilityAddTraits(index == selected ? .isSelected : [])
@@ -221,6 +227,7 @@ struct CommandBar: View {
     private func refresh() {
         let suggestions = model.commandSuggestions(query)
         list = suggestions
+        hovered = nil
         headings = suggestions.indices.map { index in
             !suggestions[index].section.isEmpty && (index == 0 || suggestions[index - 1].section != suggestions[index].section)
         }
@@ -253,7 +260,7 @@ struct CommandBar: View {
         colorScheme == .dark ? Color(white: 0.13, opacity: 0.97) : Color(red: 250 / 255, green: 250 / 255, blue: 251 / 255, opacity: 0.97)
     }
 
-    private func row(_ suggestion: CommandSuggestion, highlighted: Bool) -> some View {
+    private func row(_ suggestion: CommandSuggestion, highlighted: Bool, hovering: Bool) -> some View {
         HStack(spacing: 12) {
             Group {
                 if let id = suggestion.tabID, let icon = model.tabs.first(where: { $0.id == id })?.favicon {
@@ -270,7 +277,7 @@ struct CommandBar: View {
         }
         .font(.system(size: 13.5))
         .padding(.horizontal, 8).frame(height: 38)
-        .background(highlighted ? ink.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: Chrome.radius))
+        .background(highlighted ? ink.opacity(0.08) : hovering ? ink.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: Chrome.radius))
         .contentShape(Rectangle())
     }
 
