@@ -1082,6 +1082,18 @@ final class BrowserModel: ObservableObject {
     @Published var librarySection: LibrarySection?
     /// A hidden sidebar gives the page the whole window and slides back in
     /// over it when the pointer reaches the left edge.
+    /// Width of the sidebar, fixed or floating. Dragging its edge changes it.
+    @Published var sidebarWidth = BrowserModel.storedSidebarWidth {
+        didSet { UserDefaults.standard.set(Double(sidebarWidth), forKey: "YOBRO.sidebarWidth") }
+    }
+    static let sidebarWidths: ClosedRange<CGFloat> = 200...420
+    static var storedSidebarWidth: CGFloat {
+        let stored = UserDefaults.standard.object(forKey: "YOBRO.sidebarWidth") as? Double ?? Double(Chrome.sidebarWidth)
+        return min(max(CGFloat(stored), sidebarWidths.lowerBound), sidebarWidths.upperBound)
+    }
+    func setSidebarWidth(_ width: CGFloat) {
+        sidebarWidth = min(max(width.rounded(), Self.sidebarWidths.lowerBound), Self.sidebarWidths.upperBound)
+    }
     @Published var showSidebar = UserDefaults.standard.object(forKey: "YOBRO.showSidebar") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showSidebar, forKey: "YOBRO.showSidebar")

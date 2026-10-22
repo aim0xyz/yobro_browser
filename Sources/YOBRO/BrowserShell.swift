@@ -210,6 +210,23 @@ private struct SidebarDragEndObserver: NSViewRepresentable {
     }
 }
 
+/// A notice raised while a sheet is open would appear in the window behind
+/// it, unseen. Sheets show it themselves; dismissing it clears both.
+private struct SheetNotices: ViewModifier {
+    @ObservedObject var model: BrowserModel
+    func body(content: Content) -> some View {
+        content.overlay {
+            if let notice = model.notice {
+                YOBRODialogOverlay(icon: "info.circle.fill", title: "YoBro", message: notice, confirmTitle: "OK", confirm: { model.notice = nil })
+            }
+        }
+    }
+}
+
+extension View {
+    fileprivate func sheetNotices(_ model: BrowserModel) -> some View { modifier(SheetNotices(model: model)) }
+}
+
 /// The window: a sidebar on the Space's tone, pages as white cards beside it,
 /// and the assistant as a card on the right.
 struct BrowserShell: View {
@@ -236,7 +253,8 @@ struct BrowserShell: View {
             }
             HStack(spacing: 0) {
                 if showsSidebar {
-                    ShellSidebar(model: model, requestDelete: { deletingSpace = $0 }).frame(width: Chrome.sidebarWidth)
+                    ShellSidebar(model: model, requestDelete: { deletingSpace = $0 }).frame(width: model.sidebarWidth)
+                        .overlay(alignment: .trailing) { SidebarResizeHandle(model: model).offset(x: Chrome.inset / 2) }
                 }
                 workspace
                     .overlay {
@@ -359,12 +377,12 @@ struct BrowserShell: View {
         // A Bool presentation keeps the sheet up while the menu switches its
         // section; `sheet(item:)` would dismiss and present it again.
         .sheet(isPresented: Binding(get: { model.librarySection != nil }, set: { if !$0 { model.librarySection = nil } })) {
-            LibraryView(model: model, downloads: model.downloads, section: model.librarySection ?? .history)
+            LibraryView(model: model, downloads: model.downloads, section: model.librarySection ?? .history).sheetNotices(model)
         }
         .sheet(isPresented: $model.showOnboarding) { OnboardingView(model: model) }
-        .sheet(isPresented: $model.showSettings) { BrowserSettings(model: model, section: model.settingsSection) }
+        .sheet(isPresented: $model.showSettings) { BrowserSettings(model: model, section: model.settingsSection).sheetNotices(model) }
         .sheet(isPresented: $model.showProfileEditor) {
-            if let profiles = model.profileSession { ProfileEditor(profiles: profiles, creating: model.creatingProfile) }
+            if let profiles = model.profileSession { ProfileEditor(profiles: profiles, creating: model.creatingProfile).sheetNotices(model) }
         }
         .background(SidebarDragEndObserver(model: model))
     }
@@ -377,7 +395,7 @@ struct BrowserShell: View {
             // inherit this view's environment.
             SidebarOverlayHost(visible: isVisible) {
                 ShellSidebar(model: model, requestDelete: { deletingSpace = $0 })
-                    .frame(width: Chrome.sidebarWidth)
+                    .frame(width: model.sidebarWidth)
                     .frame(maxHeight: .infinity)
                     .background {
                         SidebarOverlayShape(radius: 14).fill(tone.background)
@@ -387,7 +405,7 @@ struct BrowserShell: View {
                     .environment(\.locale, YOBROLanguage.locale)
                     .foregroundStyle(ink)
             }
-            .frame(width: Chrome.sidebarWidth + 20)
+            .frame(width: model.sidebarWidth + 20)
             .frame(maxHeight: .infinity)
             .onHover { inside in
                 guard model.sidebarOverlayVisible else { return }
@@ -406,7 +424,7 @@ struct BrowserShell: View {
                     }
             }
         }
-        .frame(width: Chrome.sidebarWidth + 20)
+        .frame(width: model.sidebarWidth + 20)
         .ignoresSafeArea(.container, edges: .top)
     }
 
@@ -594,7 +612,7 @@ struct BrowserShell: View {
             guard let height = window.contentView?.bounds.height else { return false }
             return point.x >= 0 && point.x <= window.frame.width && point.y >= height - 40 && point.y <= height
         }
-        return point.x >= 0 && point.x <= Chrome.sidebarWidth && point.y >= 0 && point.y <= window.frame.height
+        return point.x >= 0 && point.x <= model.sidebarWidth && point.y >= 0 && point.y <= window.frame.height
     }
 
     private func sidebarDragStateChanged() {
@@ -754,8 +772,9 @@ private struct ShellSidebar: View {
         VStack(spacing: 0) {
             HStack(spacing: 5) {
                 Spacer(minLength: 0)
-                if let tab = model.active { SidebarHistoryControls(tab: tab) }
-                else { EmptySidebarHistoryControls() }
+                SidebarModeButton(model: model)
+                if let tab = model.active { SidebarHistoryControls(tab: tab, reload: model.sidebarWidth >= Chrome.sidebarWidth) }
+                else { EmptySidebarHistoryControls(reload: model.sidebarWidth >= Chrome.sidebarWidth) }
             }
             .frame(height: 30)
             .padding(.top, 11)
@@ -776,6 +795,8 @@ private struct ShellSidebar: View {
 
 private struct SidebarHistoryControls: View {
     @ObservedObject var tab: BrowserTab
+    /// A narrow sidebar has no room for it beside the window buttons; ⌘R remains.
+    var reload = true
 
     var body: some View {
         HStack(spacing: 5) {
@@ -783,18 +804,21 @@ private struct SidebarHistoryControls: View {
                 .disabled(!tab.canGoBack).yobroIconHelp(L("Zurück"))
             Button { tab.webView.goForward() } label: { Image(systemName: "chevron.right") }
                 .disabled(!tab.canGoForward).yobroIconHelp(L("Vorwärts"))
-            Button { if tab.loading { tab.webView.stopLoading() } else { tab.webView.reload() } } label: {
-                Image(systemName: tab.loading ? "xmark" : "arrow.clockwise")
-            }.disabled(tab.url.isEmpty).yobroIconHelp(tab.loading ? L("Laden stoppen", "Stop loading") : L("Neu laden"))
+            if reload {
+                Button { if tab.loading { tab.webView.stopLoading() } else { tab.webView.reload() } } label: {
+                    Image(systemName: tab.loading ? "xmark" : "arrow.clockwise")
+                }.disabled(tab.url.isEmpty).yobroIconHelp(tab.loading ? L("Laden stoppen", "Stop loading") : L("Neu laden"))
+            }
         }
         .buttonStyle(ChromeButtonStyle())
     }
 }
 
 private struct EmptySidebarHistoryControls: View {
+    var reload = true
     var body: some View {
         HStack(spacing: 5) {
-            ForEach(["chevron.left", "chevron.right", "arrow.clockwise"], id: \.self) { symbol in
+            ForEach(reload ? ["chevron.left", "chevron.right", "arrow.clockwise"] : ["chevron.left", "chevron.right"], id: \.self) { symbol in
                 Button {} label: { Image(systemName: symbol) }.disabled(true)
             }
         }
@@ -938,7 +962,7 @@ private struct TopTabStrip: View {
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal) {
                             HStack(spacing: 2) {
-                                ForEach(tabs) { tab in TopTab(tab: tab, model: model).frame(width: width).id(tab.id) }
+                                ForEach(tabs) { tab in TopTab(tab: tab, model: model, width: width).frame(width: width).id(tab.id) }
                             }
                         }
                         .scrollIndicators(.hidden)
@@ -1041,6 +1065,7 @@ private struct TopPin: View {
 private struct TopTab: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject var model: BrowserModel
+    let width: CGFloat
     @Environment(\.spaceTone) private var tone
     @State private var hovering = false
     @State private var renaming = false
@@ -1075,6 +1100,13 @@ private struct TopTab: View {
             }
         }
         .onHover { hovering = $0 }
+        // Like sidebar rows: the edges reorder, the middle makes a split.
+        .tabDropIndicator(model.tabDropFeedback?.targetID == tab.id ? model.tabDropFeedback?.intent : nil, compact: true, gap: 2, axis: .horizontal)
+        .onDrag {
+            model.beginSidebarTabDrag(tab.id)
+            return NSItemProvider(object: tab.id.uuidString as NSString)
+        }
+        .onDrop(of: [UTType.plainText], delegate: StripTabDropDelegate(targetID: tab.id, width: width, model: model))
         .contextMenu { TabMenuItems(tab: tab, model: model, rename: beginRenaming) }
         // Strip tabs can be 36 pt wide, too narrow to edit the name in place.
         .popover(isPresented: $renaming, arrowEdge: .bottom) {
@@ -1585,7 +1617,8 @@ private struct SidebarFooter: View {
                     }
                 }
                 .scrollIndicators(.hidden)
-                .frame(width: min(CGFloat(model.spaces.count) * 34, 102))
+                // Whatever the buttons beside it leave of the sidebar's width.
+                .frame(width: min(CGFloat(model.spaces.count) * 34, max(34, model.sidebarWidth - 126)))
                 .onAppear { proxy.scrollTo(model.space) }
                 .onChange(of: model.space) { _, space in withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(space) } }
                 .onChange(of: model.spaces) { _, _ in proxy.scrollTo(model.space) }
@@ -2107,6 +2140,105 @@ struct TabReorderDropDelegate: DropDelegate {
         let feedback = TabDropFeedback(targetID: targetID, intent: resolved)
         guard model.tabDropFeedback != feedback else { return }
         withAnimation(.easeOut(duration: 0.08)) { model.tabDropFeedback = feedback }
+    }
+}
+
+/// A tab in the tabs-on-top strip. Its left and right quarters move the
+/// dragged tab before or after it; the middle pairs the two in a split.
+struct StripTabDropDelegate: DropDelegate {
+    let targetID: UUID
+    let width: CGFloat
+    let model: BrowserModel
+
+    private func intent(_ info: DropInfo) -> TabDropIntent {
+        TabDropIntent.resolve(locationY: info.location.x, rowHeight: width)
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        guard model.draggingFolderID == nil, let sourceID = model.draggingTabID, sourceID != targetID,
+              let source = model.tabs.first(where: { $0.id == sourceID }),
+              let target = model.tabs.first(where: { $0.id == targetID }) else { return false }
+        return source.space == target.space
+    }
+    func dropExited(info: DropInfo) {
+        if model.tabDropFeedback?.targetID == targetID { model.tabDropFeedback = nil }
+    }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard validateDrop(info: info) else {
+            model.tabDropFeedback = nil
+            return DropProposal(operation: .forbidden)
+        }
+        let feedback = TabDropFeedback(targetID: targetID, intent: intent(info))
+        if model.tabDropFeedback != feedback { withAnimation(.easeOut(duration: 0.08)) { model.tabDropFeedback = feedback } }
+        return DropProposal(operation: .move)
+    }
+    func performDrop(info: DropInfo) -> Bool {
+        guard validateDrop(info: info), let sourceID = model.draggingTabID else { return false }
+        let sessionID = model.sidebarDragSessionID
+        var handled = false
+        withAnimation(.easeInOut(duration: 0.18)) {
+            switch intent(info) {
+            case .before: handled = model.moveTab(sourceID, relativeTo: targetID, after: false)
+            case .split: handled = model.pairTabs(sourceID, with: targetID)
+            case .after: handled = model.moveTab(sourceID, relativeTo: targetID, after: true)
+            }
+        }
+        DispatchQueue.main.async { model.finishSidebarDrag(sessionID: sessionID) }
+        return handled
+    }
+}
+
+/// The sidebar's trailing edge: drag it to resize, double-click for the
+/// default width.
+private struct SidebarResizeHandle: View {
+    @ObservedObject var model: BrowserModel
+    @State private var startWidth: CGFloat?
+    @State private var cursorPushed = false
+
+    var body: some View {
+        Color.clear
+            .frame(width: Chrome.inset)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                // Keep the resize cursor for the whole drag, even past the edge.
+                if inside, !cursorPushed { NSCursor.resizeLeftRight.push(); cursorPushed = true }
+                else if !inside, cursorPushed, startWidth == nil { NSCursor.pop(); cursorPushed = false }
+            }
+            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    let start = startWidth ?? model.sidebarWidth
+                    startWidth = start
+                    model.setSidebarWidth(start + value.translation.width)
+                }
+                .onEnded { _ in
+                    startWidth = nil
+                    if cursorPushed { NSCursor.pop(); cursorPushed = false }
+                })
+            .onTapGesture(count: 2) { model.setSidebarWidth(Chrome.sidebarWidth) }
+            .onDisappear { if cursorPushed { NSCursor.pop(); cursorPushed = false } }
+            .yobroHelp(L("Ziehen, um die Breite zu ändern · Doppelklick setzt sie zurück", "Drag to resize · double-click to reset"))
+            .accessibilityElement()
+            .accessibilityLabel(L("Breite der Seitenleiste", "Sidebar width"))
+            .accessibilityValue("\(Int(model.sidebarWidth))")
+            .accessibilityAdjustableAction { direction in
+                model.setSidebarWidth(model.sidebarWidth + (direction == .increment ? 20 : -20))
+            }
+    }
+}
+
+/// Switches the sidebar between fixed beside the page and floating over it,
+/// where it slides in at the left edge.
+private struct SidebarModeButton: View {
+    @ObservedObject var model: BrowserModel
+
+    var body: some View {
+        Button { withAnimation(.easeInOut(duration: 0.2)) { model.showSidebar.toggle() } } label: {
+            Image(systemName: model.showSidebar ? "sidebar.left" : "pin")
+        }
+        .buttonStyle(ChromeButtonStyle())
+        .yobroIconHelp(model.showSidebar ? L("Seitenleiste schweben lassen · ⌘S", "Float sidebar · ⌘S") : L("Seitenleiste fixieren · ⌘S", "Pin sidebar · ⌘S"),
+                       label: model.showSidebar ? L("Seitenleiste schweben lassen", "Float sidebar") : L("Seitenleiste fixieren", "Pin sidebar"))
     }
 }
 

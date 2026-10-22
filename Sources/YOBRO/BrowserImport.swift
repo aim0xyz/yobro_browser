@@ -188,10 +188,12 @@ final class BrowserImportStore: ObservableObject {
         guard !busy else { return }
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.message = L("Profilordner von \(browser) wählen.", "Choose the profile folder for \(browser).")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let profile = ImportProfile(id: url.path, browser: browser, name: url.lastPathComponent, path: url.path)
-        profiles.removeAll { $0.id == profile.id }; profiles.append(profile)
-        selectProfile(profile.id)
+        FilePanel.present(panel) { [self] url in
+            guard let url else { return }
+            let profile = ImportProfile(id: url.path, browser: browser, name: url.lastPathComponent, path: url.path)
+            profiles.removeAll { $0.id == profile.id }; profiles.append(profile)
+            selectProfile(profile.id)
+        }
     }
 
     func readProfile() async {
@@ -209,8 +211,10 @@ final class BrowserImportStore: ObservableObject {
         let panel = NSOpenPanel(); panel.message = kind.format
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         if kind == .passwords { panel.allowedContentTypes = [.commaSeparatedText, .plainText] }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await loadFile(kind, url: url) }
+        FilePanel.present(panel) { [self] url in
+            guard let url else { return }
+            Task { await loadFile(kind, url: url) }
+        }
     }
 
     func loadFile(_ kind: ImportKind, url: URL) async {

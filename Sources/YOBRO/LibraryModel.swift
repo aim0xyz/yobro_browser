@@ -403,16 +403,11 @@ extension BrowserModel {
         source.folderID = destination.folderID
         tabs.insert(source, at: targetIndex + (after ? 1 : 0)); save(); return true
     }
+    /// The middle of a tab pairs the two into a split, wherever they live; the
+    /// edges move the tab before or after it. A split partner joins the
+    /// target's folder.
     func tabDropIntent(_ id: UUID, on target: UUID, locationY: CGFloat, rowHeight: CGFloat) -> TabDropIntent {
-        let intent = TabDropIntent.resolve(locationY: locationY, rowHeight: rowHeight)
-        guard intent == .split,
-              let source = tabs.first(where: { $0.id == id }),
-              let destination = tabs.first(where: { $0.id == target }),
-              destination.folderID != nil,
-              source.folderID != destination.folderID else { return intent }
-        // Dropping on a tab inside another folder should file the dragged tab
-        // beside it; split view remains available within the same folder.
-        return .after
+        TabDropIntent.resolve(locationY: locationY, rowHeight: rowHeight)
     }
     func handleTabDrop(_ id: UUID, on target: UUID, locationY: CGFloat, rowHeight: CGFloat) -> Bool {
         switch tabDropIntent(id, on: target, locationY: locationY, rowHeight: rowHeight) {

@@ -119,7 +119,7 @@ struct YOBROApp: App {
     /// In the tabs-on-top layout ⌘S shows and hides the tab strip.
     private var sidebarToggleTitle: String {
         if browser.tabsOnTop { return browser.showSidebar ? L("Tableiste ausblenden", "Hide tab bar") : L("Tableiste einblenden", "Show tab bar") }
-        return browser.showSidebar ? L("Seitenleiste einklappen") : L("Seitenleiste einblenden")
+        return browser.showSidebar ? L("Seitenleiste schweben lassen", "Float sidebar") : L("Seitenleiste fixieren", "Pin sidebar")
     }
 
     private func openSettings(_ section: String) {

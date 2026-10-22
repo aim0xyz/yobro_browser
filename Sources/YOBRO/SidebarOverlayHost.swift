@@ -44,7 +44,7 @@ final class SidebarOverlayTransition {
         lastVisible = visible
         generation &+= 1
         let current = generation
-        let offscreen = CATransform3DMakeTranslation(-(Chrome.sidebarWidth + 24), 0, 0)
+        let offscreen = CATransform3DMakeTranslation(-(view.bounds.width + 24), 0, 0)
         if reduceMotion {
             view.layer?.transform = CATransform3DIdentity
             view.alphaValue = 1

@@ -59,8 +59,10 @@ final class ExtensionStore: ObservableObject {
         guard supported, !busy else { return }
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = true
         panel.message = L("Erweiterungsordner mit manifest.json oder eine ZIP-/CRX-Datei wählen.")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await prepare(url) }
+        FilePanel.present(panel) { [self] url in
+            guard let url else { return }
+            Task { await prepare(url) }
+        }
     }
     func prepare(_ url: URL) async {
         guard #available(macOS 15.4, *), !busy else { return }

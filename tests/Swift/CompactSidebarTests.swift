@@ -233,7 +233,7 @@ final class CompactSidebarTests: XCTestCase {
     }
 
     @MainActor
-    func testDroppingOntoTabInAnotherFolderFilesItThere() throws {
+    func testDroppingOntoTabInAnotherFolderSplitsAndJoinsTheFolder() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
         let model = BrowserModel(root: home)
@@ -243,10 +243,15 @@ final class CompactSidebarTests: XCTestCase {
         model.moveToFolder(target.id, folder: folder.id)
         let dragged = model.newTab()
 
-        XCTAssertEqual(model.tabDropIntent(dragged.id, on: target.id, locationY: 22, rowHeight: 44), .after)
+        XCTAssertEqual(model.tabDropIntent(dragged.id, on: target.id, locationY: 22, rowHeight: 44), .split)
         XCTAssertTrue(model.handleTabDrop(dragged.id, on: target.id, locationY: 22, rowHeight: 44))
         XCTAssertEqual(dragged.folderID, folder.id)
-        XCTAssertFalse(model.splitPairs.contains { $0.contains(target.id) && $0.contains(dragged.id) })
+        XCTAssertTrue(model.splitPairs.contains { $0.contains(target.id) && $0.contains(dragged.id) })
+        // The edge still files it beside the tab without a split.
+        let another = model.newTab()
+        XCTAssertTrue(model.handleTabDrop(another.id, on: target.id, locationY: 40, rowHeight: 44))
+        XCTAssertEqual(another.folderID, folder.id)
+        XCTAssertFalse(model.splitPairs.contains { $0.contains(another.id) })
     }
 
     func testTabDropZonesCommunicateReorderAndSplitIntents() {

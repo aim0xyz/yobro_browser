@@ -2,6 +2,22 @@ import SwiftUI
 import WebKit
 import AppKit
 
+/// File panels opened from a sheet attach to it, as a sheet of their own,
+/// instead of running app-modal from inside the sheet's button action.
+@MainActor
+enum FilePanel {
+    static func present(_ panel: NSSavePanel, completion: @escaping (URL?) -> Void) {
+        // The frontmost sheet, such as Settings, whichever window holds the focus.
+        var window = NSApp.keyWindow ?? NSApp.mainWindow
+        while let sheet = window?.attachedSheet, !(sheet is NSSavePanel) { window = sheet }
+        if let window, window.isVisible, window.attachedSheet == nil {
+            panel.beginSheetModal(for: window) { response in completion(response == .OK ? panel.url : nil) }
+        } else {
+            completion(panel.runModal() == .OK ? panel.url : nil)
+        }
+    }
+}
+
 struct BrowserSettings: View {
     @ObservedObject var model: BrowserModel
     @State var section = L("Allgemein", "General")
@@ -194,6 +210,7 @@ struct GeneralSettings: View {
 struct DownloadSettings: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject private var downloads: DownloadStore
+    @State private var saved = false
 
     init(model: BrowserModel) {
         self.model = model
@@ -235,6 +252,9 @@ struct DownloadSettings: View {
                     if downloads.activeCount > 0 {
                         Label(L("Der Ordner kann geändert werden, sobald alle Downloads beendet sind.", "You can change the folder after all downloads finish."), systemImage: "arrow.down.circle")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
+                    } else if saved {
+                        Label(L("Gespeichert. Neue Downloads landen in diesem Ordner.", "Saved. New downloads go to this folder."), systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                 }.yobroCard(padding: 16, emphasized: true)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -247,17 +267,27 @@ struct DownloadSettings: View {
         panel.prompt = L("Auswählen", "Choose")
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.directoryURL = downloads.directory
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            if try !downloads.setDirectory(url) { model.notice = L("Bitte warte, bis alle Downloads beendet sind.", "Please wait until all downloads finish.") }
-        } catch { model.notice = error.localizedDescription }
+        // The default folder may not exist yet; start beside it then.
+        let current = downloads.directory
+        panel.directoryURL = FileManager.default.fileExists(atPath: current.path) ? current : current.deletingLastPathComponent()
+        saved = false
+        FilePanel.present(panel) { url in
+            guard let url else { return }
+            apply { try downloads.setDirectory(url) }
+        }
     }
 
     private func resetDirectory() {
+        saved = false
+        apply { try downloads.resetDirectory() }
+    }
+
+    private func apply(_ change: () throws -> Bool) {
         do {
-            if try !downloads.resetDirectory() { model.notice = L("Bitte warte, bis alle Downloads beendet sind.", "Please wait until all downloads finish.") }
+            if try change() { saved = true }
+            else { model.notice = L("Bitte warte, bis alle Downloads beendet sind.", "Please wait until all downloads finish.") }
         } catch { model.notice = error.localizedDescription }
     }
 
@@ -617,14 +647,7 @@ struct BookmarkSettings: View {
             Text(L("\(model.bookmarks.count) Lesezeichen", "\(model.bookmarks.count) bookmarks")).font(.caption).foregroundStyle(.secondary)
         }
     }
-    private func remove(_ entry: BookmarkEntry) {
-        let updated = model.bookmarks.filter { $0.id != entry.id }
-        do {
-            try JSONEncoder().encode(updated).write(to: model.home.appendingPathComponent("bookmarks.json"), options: .atomic)
-            model.bookmarks = updated
-        }
-        catch { self.error = error.localizedDescription }
-    }
+    private func remove(_ entry: BookmarkEntry) { model.removeBookmark(entry) }
 }
 
 struct PasswordSettings: View {
