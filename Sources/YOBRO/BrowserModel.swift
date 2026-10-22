@@ -1079,6 +1079,11 @@ final class BrowserModel: ObservableObject {
     @Published var draggingFolderID: UUID?
     @Published var folderDropFeedback: TabDropFeedback?
     @Published private(set) var sidebarDragSessionID: UUID?
+    /// Collapsed folders shown open for the current tab drag only: the
+    /// dragged tab's own folder, and any folder whose header it rests on.
+    @Published private(set) var springOpenFolderIDs: Set<UUID> = []
+    private var springLoadingFolderID: UUID?
+    private var springLoadingTask: Task<Void, Never>?
     @Published var librarySection: LibrarySection?
     /// A hidden sidebar gives the page the whole window and slides back in
     /// over it when the pointer reaches the left edge.
@@ -1094,6 +1099,9 @@ final class BrowserModel: ObservableObject {
     func setSidebarWidth(_ width: CGFloat) {
         sidebarWidth = min(max(width.rounded(), Self.sidebarWidths.lowerBound), Self.sidebarWidths.upperBound)
     }
+    /// How far the floating sidebar reaches into the window: the card, its
+    /// margin and room for its shadow.
+    var sidebarOverlayWidth: CGFloat { sidebarWidth + Chrome.inset + 20 }
     @Published var showSidebar = UserDefaults.standard.object(forKey: "YOBRO.showSidebar") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showSidebar, forKey: "YOBRO.showSidebar")
@@ -1321,6 +1329,32 @@ final class BrowserModel: ObservableObject {
         folderDropFeedback = nil
         draggingTabID = id
         tabDropFeedback = nil
+        // The tab's siblings in a collapsed folder become drop targets, so it
+        // can be paired with any of them.
+        cancelFolderSpringLoading()
+        springOpenFolderIDs = Set([tabs.first { $0.id == id }?.folderID].compactMap { $0 })
+    }
+
+    /// A tab dragged onto a collapsed folder's header opens the folder after
+    /// a moment, like a Finder folder.
+    func springLoadFolder(_ id: UUID) {
+        guard draggingTabID != nil, springLoadingFolderID != id, !springOpenFolderIDs.contains(id),
+              folders.first(where: { $0.id == id })?.collapsed == true else { return }
+        springLoadingTask?.cancel()
+        springLoadingFolderID = id
+        springLoadingTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard let self, !Task.isCancelled, self.draggingTabID != nil, self.springLoadingFolderID == id else { return }
+            self.springLoadingFolderID = nil
+            _ = withAnimation(.easeInOut(duration: 0.18)) { self.springOpenFolderIDs.insert(id) }
+        }
+    }
+
+    func cancelFolderSpringLoading(_ id: UUID? = nil) {
+        guard id == nil || springLoadingFolderID == id else { return }
+        springLoadingTask?.cancel()
+        springLoadingTask = nil
+        springLoadingFolderID = nil
     }
 
     func beginSidebarFolderDrag(_ id: UUID) {
@@ -1339,6 +1373,8 @@ final class BrowserModel: ObservableObject {
         tabDropFeedback = nil
         folderDropFeedback = nil
         sidebarDragSessionID = nil
+        cancelFolderSpringLoading()
+        springOpenFolderIDs = []
     }
 
 
@@ -1430,7 +1466,8 @@ final class BrowserModel: ObservableObject {
     }
 
     /// The Space's tabs in the order the tab list shows them: pins first, then
-    /// folders (a collapsed one only shows its active tab), then loose tabs.
+    /// folders (a collapsed one only shows its active tab and that tab's
+    /// split partner), then loose tabs.
     var displayOrderedTabs: [BrowserTab] {
         let visible = visibleTabs
         let pins = visible.filter(\.pinned)
@@ -1439,9 +1476,27 @@ final class BrowserModel: ObservableObject {
         var ordered = pins
         for folder in folders where folder.space == space {
             let members = loose.filter { $0.folderID == folder.id }
-            ordered += folder.collapsed ? members.filter { $0.id == activeID } : members
+            ordered += folder.collapsed ? collapsedFolderTabs(members) : members
         }
         return ordered + loose.filter { $0.folderID == nil }
+    }
+
+    /// What a collapsed folder still shows of its tabs: the open page and the
+    /// other half of its split, whichever of them it holds.
+    func collapsedFolderTabs(_ members: [BrowserTab]) -> [BrowserTab] {
+        guard let activeID else { return [] }
+        let partner = splitPairs.first { $0.contains(activeID) }?.other(activeID)
+        return members.filter { $0.id == activeID || $0.id == partner }
+    }
+
+    /// A folder's rows in the sidebar. Opened for a drag, a collapsed folder
+    /// lists its hidden tabs below the rows it already showed, so nothing
+    /// moves under the pointer.
+    func sidebarFolderTabs(_ folder: TabFolder, members: [BrowserTab]) -> [BrowserTab] {
+        guard folder.collapsed else { return members }
+        let shown = collapsedFolderTabs(members)
+        guard springOpenFolderIDs.contains(folder.id) else { return shown }
+        return shown + members.filter { tab in !shown.contains { $0.id == tab.id } }
     }
 
     /// Moves to the next (`+1`) or previous (`-1`) tab in display order,
@@ -1786,7 +1841,9 @@ final class BrowserModel: ObservableObject {
             let userTabs = tabs.filter { !agentTabIDs.contains($0.id) && !$0.isPrivate }
             let userIDs = Set(userTabs.map(\.id))
             let remembered = lastActiveBySpace.filter { userIDs.contains($0.value) }.mapValues(\.uuidString)
-            let data = try JSONEncoder().encode(StoredSession(tabs: userTabs.map(\.stored), activeID: activeID, space: space, closedTabs: closedTabs, spaces: spaces, spaceIcons: spaceIcons, spaceTones: spaceTones, folders: folders, splitPairs: splitPairs, lastActiveBySpace: remembered))
+            // A split with a private tab ends with it, like the tab itself.
+            let pairs = splitPairs.filter { userIDs.contains($0.first) && userIDs.contains($0.second) }
+            let data = try JSONEncoder().encode(StoredSession(tabs: userTabs.map(\.stored), activeID: activeID, space: space, closedTabs: closedTabs, spaces: spaces, spaceIcons: spaceIcons, spaceTones: spaceTones, folders: folders, splitPairs: pairs, lastActiveBySpace: remembered))
             try data.write(to: home.appendingPathComponent("session.json"), options: .atomic)
             return true
         } catch {

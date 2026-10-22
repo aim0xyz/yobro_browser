@@ -42,7 +42,7 @@ final class AppearanceWebView: WKWebView {
     private func shouldYieldToSidebar(at windowPoint: NSPoint) -> Bool {
         guard let model = tab?.owner, !model.showSidebar else { return false }
         if !model.tabsOnTop {
-            if windowPoint.x <= 260 && (model.sidebarOverlayVisible || model.draggingTabID != nil || model.draggingFolderID != nil) {
+            if windowPoint.x <= model.sidebarOverlayWidth && (model.sidebarOverlayVisible || model.draggingTabID != nil || model.draggingFolderID != nil) {
                 return true
             }
         } else if model.sidebarOverlayVisible, let height = window?.contentView?.bounds.height, windowPoint.y >= height - 40 {
@@ -61,21 +61,22 @@ final class AppearanceWebView: WKWebView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if shouldYieldToSidebar(at: sender.draggingLocation) {
+        // A sidebar tab is no text for the page.
+        if sender.draggingSource is SidebarDragSource || shouldYieldToSidebar(at: sender.draggingLocation) {
             return []
         }
         return super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if shouldYieldToSidebar(at: sender.draggingLocation) {
+        if sender.draggingSource is SidebarDragSource || shouldYieldToSidebar(at: sender.draggingLocation) {
             return []
         }
         return super.draggingUpdated(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if shouldYieldToSidebar(at: sender.draggingLocation) {
+        if sender.draggingSource is SidebarDragSource || shouldYieldToSidebar(at: sender.draggingLocation) {
             return false
         }
         return super.performDragOperation(sender)

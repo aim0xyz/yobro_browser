@@ -643,6 +643,138 @@ final class CompactSidebarTests: XCTestCase {
     }
 
     @MainActor
+    func testDockClickBringsTheClosedBrowserWindowBack() {
+        let delegate = AppDelegate()
+        var reopened = 0
+        delegate.reopenWindow = { reopened += 1 }
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+        XCTAssertEqual(reopened, 1)
+        // Settings may still be open; the browser window comes back all the same.
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true))
+        XCTAssertEqual(reopened, 2)
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.orderFront(nil)
+        delegate.browserWindow = window
+        XCTAssertTrue(delegate.browserWindowIsShown)
+        XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true))
+        XCTAssertEqual(reopened, 2, "A window on screen is left to AppKit")
+
+        window.close()
+        XCTAssertFalse(delegate.browserWindowIsShown)
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+        XCTAssertEqual(reopened, 3)
+    }
+
+    @MainActor
+    func testDraggingAFolderTabOpensItsCollapsedFolderUntilTheDragEnds() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Work")
+        let folder = try XCTUnwrap(model.folders.first).id
+        let first = model.newTab(), second = model.newTab(), loose = model.newTab()
+        model.moveToFolder(first.id, folder: folder)
+        model.moveToFolder(second.id, folder: folder)
+        model.folders[0].collapsed = true
+
+        model.beginSidebarTabDrag(loose.id)
+        XCTAssertTrue(model.springOpenFolderIDs.isEmpty, "A loose tab opens no folder by itself")
+        model.select(second.id)
+        let members = [first, second]
+        XCTAssertEqual(model.sidebarFolderTabs(model.folders[0], members: members).map(\.id), [second.id])
+        model.beginSidebarTabDrag(second.id)
+        XCTAssertEqual(model.springOpenFolderIDs, [folder])
+        XCTAssertEqual(model.sidebarFolderTabs(model.folders[0], members: members).map(\.id), [second.id, first.id],
+                       "The dragged row stays put; its hidden siblings appear below it")
+        model.finishSidebarDrag()
+        XCTAssertTrue(model.springOpenFolderIDs.isEmpty)
+        XCTAssertTrue(model.folders[0].collapsed, "Opening for a drag is never saved")
+    }
+
+    @MainActor
+    func testRestingOnACollapsedFolderHeaderOpensItForTheDrag() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Work")
+        let folder = try XCTUnwrap(model.folders.first).id
+        model.moveToFolder(model.newTab().id, folder: folder)
+        model.folders[0].collapsed = true
+        let loose = model.newTab()
+
+        model.beginSidebarTabDrag(loose.id)
+        model.springLoadFolder(folder)
+        model.cancelFolderSpringLoading(folder)
+        try await Task.sleep(nanoseconds: 750_000_000)
+        XCTAssertTrue(model.springOpenFolderIDs.isEmpty, "Passing over the header does not open it")
+
+        model.springLoadFolder(folder)
+        model.springLoadFolder(folder)
+        try await Task.sleep(nanoseconds: 750_000_000)
+        XCTAssertEqual(model.springOpenFolderIDs, [folder])
+        model.finishSidebarDrag()
+        XCTAssertTrue(model.springOpenFolderIDs.isEmpty)
+    }
+
+    @MainActor
+    func testCollapsedFolderKeepsShowingBothHalvesOfItsSplit() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Work")
+        let folder = try XCTUnwrap(model.folders.first).id
+        let first = model.newTab(), middle = model.newTab(), last = model.newTab()
+        for tab in [first, middle, last] { model.moveToFolder(tab.id, folder: folder) }
+        model.folders[0].collapsed = true
+
+        XCTAssertTrue(model.handleTabDrop(last.id, on: first.id, locationY: 22, rowHeight: 44))
+        XCTAssertEqual(model.activeID, first.id)
+        XCTAssertEqual(model.displayOrderedTabs.map(\.id), [first.id, last.id])
+        model.select(middle.id)
+        XCTAssertEqual(model.displayOrderedTabs.map(\.id), [middle.id])
+
+        // A private partner stays outside the folder; its half still shows the folder's.
+        let privateTab = model.newTab(isPrivate: true)
+        XCTAssertTrue(model.pairTabs(privateTab.id, with: middle.id))
+        model.select(privateTab.id)
+        XCTAssertEqual(model.displayOrderedTabs.map(\.id), [middle.id, privateTab.id])
+    }
+
+    @MainActor
+    func testSplitPartnerJoinsTheFolderOnlyWhereItMay() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let model = BrowserModel(root: home)
+        try model.addFolder("Work")
+        let folder = try XCTUnwrap(model.folders.first).id
+        let target = model.newTab()
+        model.moveToFolder(target.id, folder: folder)
+
+        let pinned = model.newTab()
+        pinned.pinned = true
+        XCTAssertTrue(model.pairTabs(pinned.id, with: target.id))
+        XCTAssertEqual(pinned.folderID, folder)
+        XCTAssertFalse(pinned.pinned, "A tab is pinned or in a folder, never both")
+
+        let privateTab = model.newTab(isPrivate: true)
+        XCTAssertTrue(model.pairTabs(privateTab.id, with: target.id))
+        XCTAssertNil(privateTab.folderID, "Folders are saved; a private tab never is")
+        model.persistSession()
+        let data = try Data(contentsOf: home.appendingPathComponent("session.json"))
+        let saved = try JSONDecoder().decode(StoredSession.self, from: data)
+        XCTAssertEqual(saved.splitPairs ?? [], [], "A split with a private tab is not saved")
+
+        // Filing the split elsewhere leaves the private half out as well.
+        try model.addFolder("Later")
+        let later = try XCTUnwrap(model.folders.last).id
+        model.moveToFolder(target.id, folder: later)
+        XCTAssertEqual(target.folderID, later)
+        XCTAssertNil(privateTab.folderID)
+    }
+
+    @MainActor
     func testBlankTabFocusesItsInlineAddressField() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let previous = getenv("YOBRO_HOME").map { String(cString:$0) }; setenv("YOBRO_HOME",home.path,1)

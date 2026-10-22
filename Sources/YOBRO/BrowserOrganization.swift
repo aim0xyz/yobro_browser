@@ -120,7 +120,8 @@ extension BrowserModel {
         guard folder == nil || !tab.isPrivate else { return }
         if let folder, !folders.contains(where: { $0.id == folder && $0.space == tab.space }) { return }
         let partner = splitPairs.first(where: { $0.contains(tabID) })?.other(tabID).flatMap { id in tabs.first { $0.id == id } }
-        for member in [tab, partner].compactMap({ $0 }) {
+        // A private partner stays out of the folder, split and all.
+        for member in [tab, partner].compactMap({ $0 }) where folder == nil || !member.isPrivate {
             member.folderID = folder
             // A tab lives either in the pins or in a folder, never both.
             if folder != nil { member.pinned = false }
@@ -149,7 +150,10 @@ extension BrowserModel {
         guard !agentTabIDs.contains(dragged), !agentTabIDs.contains(target), dragged != target, let first = tabs.first(where: { $0.id == target }), let second = tabs.first(where: { $0.id == dragged }), first.space == second.space else { return false }
         splitPairs.removeAll { $0.contains(dragged) || $0.contains(target) }
         splitPairs.append(StoredSplit(first: target, second: dragged))
-        second.folderID = first.folderID
+        // The partner joins the target's folder, unless it is private: folders
+        // are saved, private tabs never are. In a folder it is no longer pinned.
+        if !second.isPrivate { second.folderID = first.folderID }
+        if second.folderID != nil { second.pinned = false }
         first.resume()
         second.resume()
         select(target); persistSession(); return true
@@ -188,15 +192,13 @@ struct SpaceFolderRow: View {
     @State private var revealTask: Task<Void, Never>?
     @State private var dismissTask: Task<Void, Never>?
     private var tabs: [BrowserTab] { model.visibleTabs.filter { $0.folderID == folder.id && !$0.pinned } }
-    private var activeFolderTab: BrowserTab? {
-        guard folder.collapsed, let activeID = model.activeID else { return nil }
-        return tabs.first { $0.id == activeID }
-    }
-    private var displayedTabs: [BrowserTab] {
-        if folder.collapsed { return activeFolderTab.map { [$0] } ?? [] }
-        return tabs
-    }
-    private var hiddenTabCount: Int { max(0, tabs.count - (activeFolderTab == nil ? 0 : 1)) }
+    /// Collapsed and not opened for a drag, which shows all its tabs so any
+    /// of them can take the drop.
+    private var showsCollapsed: Bool { folder.collapsed && !model.springOpenFolderIDs.contains(folder.id) }
+    /// Collapsed, the folder still shows its open page and that page's split partner.
+    private var collapsedTabs: [BrowserTab] { showsCollapsed ? model.collapsedFolderTabs(tabs) : [] }
+    private var displayedTabs: [BrowserTab] { model.sidebarFolderTabs(folder, members: tabs) }
+    private var hiddenTabCount: Int { max(0, tabs.count - collapsedTabs.count) }
     var body: some View {
         VStack(spacing: 3) {
             Button {
@@ -207,13 +209,13 @@ struct SpaceFolderRow: View {
                 setCollapsed(!folder.collapsed)
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: folder.collapsed ? "folder.fill" : "folder")
+                    Image(systemName: showsCollapsed ? "folder.fill" : "folder")
                         .font(.system(size: 13))
                         .foregroundStyle(folder.color == nil ? tone.muted : folder.folderColor.color)
                         .frame(width: 16)
                     Text(folder.name).font(.system(size: 13)).lineLimit(1)
                     Spacer()
-                    if activeFolderTab != nil && hiddenTabCount > 0 {
+                    if !collapsedTabs.isEmpty && hiddenTabCount > 0 {
                         Text("+\(hiddenTabCount)")
                             .font(.system(size: 10, weight: .semibold))
                             .monospacedDigit()
@@ -221,7 +223,7 @@ struct SpaceFolderRow: View {
                             .frame(height: 18)
                             .background(Chrome.rest, in: Capsule())
                             .accessibilityLabel(L("\(hiddenTabCount) weitere Tabs", "\(hiddenTabCount) more tabs"))
-                    } else if folder.collapsed {
+                    } else if showsCollapsed {
                         Text("\(tabs.count)").font(.system(size: 10)).opacity(0.6)
                     }
                 }
@@ -234,9 +236,8 @@ struct SpaceFolderRow: View {
             .buttonStyle(.plain)
                 .accessibilityValue(folder.collapsed ? L("Eingeklappt", "Collapsed") : L("Ausgeklappt", "Expanded"))
                 .contentShape(Rectangle())
-                .onDrag {
+                .sidebarDragSource("folder:\(folder.id.uuidString)", title: folder.name, icon: "folder.fill", model: model) {
                     model.beginSidebarFolderDrag(folder.id)
-                    return NSItemProvider(object: "folder:\(folder.id.uuidString)" as NSString)
                 }
                 .onHover {
                     sourceHovered = $0
@@ -282,14 +283,14 @@ struct SpaceFolderRow: View {
                                 }
                                 .buttonStyle(OrganizationPopoverButtonStyle())
                                 .contentShape(Rectangle())
-                                .tabDropIndicator(model.tabDropFeedback?.targetID == tab.id ? model.tabDropFeedback?.intent : nil, gap: 5)
-                                .onDrag {
+                                .sidebarDragSource(tab.id.uuidString, title: tab.sidebarTitle, model: model) {
+                                    // The popover closes as the drag starts; the
+                                    // folder opens in the sidebar instead (see
+                                    // `beginSidebarTabDrag`) and must not bring it back.
+                                    revealTask?.cancel(); dismissTask?.cancel()
                                     model.beginSidebarTabDrag(tab.id)
-                                    return NSItemProvider(object: tab.id.uuidString as NSString)
+                                    model.hoveredFolderID = nil
                                 }
-                                .onDrop(of: [.plainText], delegate: TabReorderDropDelegate(
-                                    targetID: tab.id, rowHeight: 42, model: model
-                                ))
                             }
                         }
                     }
@@ -302,7 +303,7 @@ struct SpaceFolderRow: View {
                     // A transient macOS popover consumes the first click on its
                     // source view. Treat dismissal while still hovering the
                     // closed folder as that intended click and expand it.
-                    if hoveredID == nil && sourceHovered && folder.collapsed { setCollapsed(false) }
+                    if hoveredID == nil && sourceHovered && folder.collapsed && model.draggingTabID == nil { setCollapsed(false) }
                 }
                 .onDrop(of: [.plainText], delegate: FolderHeaderDropDelegate(
                     folderID: folder.id, rowHeight: 36, model: model, tabTargeted: $targeted
@@ -410,18 +411,25 @@ struct FolderHeaderDropDelegate: DropDelegate {
         return tab.space == folder.space && !tab.isPrivate
     }
 
-    func dropEntered(info: DropInfo) { updateFeedback(info) }
+    func dropEntered(info: DropInfo) {
+        model.springLoadFolder(folderID)
+        updateFeedback(info)
+    }
     func dropExited(info: DropInfo) {
+        model.cancelFolderSpringLoading(folderID)
         tabTargeted = false
         if model.folderDropFeedback?.targetID == folderID { model.folderDropFeedback = nil }
     }
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        // Any tab, even one the folder would refuse, may want a split inside it.
+        model.springLoadFolder(folderID)
         guard validateDrop(info: info) else { tabTargeted = false; return DropProposal(operation: .forbidden) }
         model.autoScrollSidebarDuringDrag()
         updateFeedback(info)
-        return DropProposal(operation: .move)
+        return .sidebarDrop
     }
     func performDrop(info: DropInfo) -> Bool {
+        model.cancelFolderSpringLoading(folderID)
         guard validateDrop(info: info) else { return false }
         tabTargeted = false
         let sessionID = model.sidebarDragSessionID

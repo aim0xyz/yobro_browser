@@ -157,8 +157,8 @@ private struct SidebarScrollObserver: NSViewRepresentable {
     }
 }
 
-/// SwiftUI's `onDrag` has no cancellation callback on macOS. Observing mouse-up
-/// ensures an aborted drop cannot leave a tab translucent or pin the overlay.
+/// A backstop for a drag whose session never reports its end: observing
+/// mouse-up ensures an aborted drop cannot leave a tab translucent or pin the overlay.
 private struct SidebarDragEndObserver: NSViewRepresentable {
     let model: BrowserModel
 
@@ -188,6 +188,8 @@ private struct SidebarDragEndObserver: NSViewRepresentable {
             globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
                 self?.finishAfterCurrentEvent()
             }
+            // Watching presses from the start, before the first drag.
+            _ = SidebarDragSource.shared
         }
 
         private func finishAfterCurrentEvent() {
@@ -394,18 +396,22 @@ struct BrowserShell: View {
             // The overlay is hosted in its own NSHostingView, which does not
             // inherit this view's environment.
             SidebarOverlayHost(visible: isVisible) {
-                ShellSidebar(model: model, requestDelete: { deletingSpace = $0 })
+                // A card floating over the page, clear of the window edges
+                // like the page itself.
+                ShellSidebar(model: model, requestDelete: { deletingSpace = $0 }, floating: true)
                     .frame(width: model.sidebarWidth)
                     .frame(maxHeight: .infinity)
                     .background {
-                        SidebarOverlayShape(radius: 14).fill(tone.background)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(tone.background)
                             .shadow(color: .black.opacity(0.22), radius: 18, x: 4)
                     }
+                    .padding([.leading, .vertical], Chrome.inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .environment(\.spaceTone, tone)
                     .environment(\.locale, YOBROLanguage.locale)
                     .foregroundStyle(ink)
             }
-            .frame(width: model.sidebarWidth + 20)
+            .frame(width: model.sidebarOverlayWidth)
             .frame(maxHeight: .infinity)
             .onHover { inside in
                 guard model.sidebarOverlayVisible else { return }
@@ -424,7 +430,7 @@ struct BrowserShell: View {
                     }
             }
         }
-        .frame(width: model.sidebarWidth + 20)
+        .frame(width: model.sidebarOverlayWidth)
         .ignoresSafeArea(.container, edges: .top)
     }
 
@@ -612,7 +618,7 @@ struct BrowserShell: View {
             guard let height = window.contentView?.bounds.height else { return false }
             return point.x >= 0 && point.x <= window.frame.width && point.y >= height - 40 && point.y <= height
         }
-        return point.x >= 0 && point.x <= model.sidebarWidth && point.y >= 0 && point.y <= window.frame.height
+        return point.x >= 0 && point.x <= model.sidebarWidth + Chrome.inset && point.y >= 0 && point.y <= window.frame.height
     }
 
     private func sidebarDragStateChanged() {
@@ -758,6 +764,8 @@ extension View {
 private struct ShellSidebar: View {
     @ObservedObject var model: BrowserModel
     let requestDelete: (String) -> Void
+    /// The floating card starts `Chrome.inset` below the window's top edge.
+    var floating = false
     @State private var editor: SidebarEditor?
 
     /// The pin area also appears while a pinnable tab is dragged, so the first
@@ -777,7 +785,8 @@ private struct ShellSidebar: View {
                 else { EmptySidebarHistoryControls(reload: model.sidebarWidth >= Chrome.sidebarWidth) }
             }
             .frame(height: 30)
-            .padding(.top, 11)
+            // Level with the traffic lights, which stay where they are.
+            .padding(.top, floating ? 11 - Chrome.inset : 11)
             AddressPlate(model: model).padding(.top, Chrome.inset)
             if showsPins {
                 PinGrid(model: model).padding(.top, Chrome.inset)
@@ -1102,10 +1111,7 @@ private struct TopTab: View {
         .onHover { hovering = $0 }
         // Like sidebar rows: the edges reorder, the middle makes a split.
         .tabDropIndicator(model.tabDropFeedback?.targetID == tab.id ? model.tabDropFeedback?.intent : nil, compact: true, gap: 2, axis: .horizontal)
-        .onDrag {
-            model.beginSidebarTabDrag(tab.id)
-            return NSItemProvider(object: tab.id.uuidString as NSString)
-        }
+        .sidebarDragSource(tab.id.uuidString, title: tab.sidebarTitle, model: model) { model.beginSidebarTabDrag(tab.id) }
         .onDrop(of: [UTType.plainText], delegate: StripTabDropDelegate(targetID: tab.id, width: width, model: model))
         .contextMenu { TabMenuItems(tab: tab, model: model, rename: beginRenaming) }
         // Strip tabs can be 36 pt wide, too narrow to edit the name in place.
@@ -1352,10 +1358,7 @@ private struct PinTile: View {
                 .onAppear { width = geometry.size.width }
                 .onChange(of: geometry.size.width) { _, value in width = value }
         })
-        .onDrag {
-            model.beginSidebarTabDrag(tab.id)
-            return NSItemProvider(object: tab.id.uuidString as NSString)
-        }
+        .sidebarDragSource(tab.id.uuidString, title: tab.sidebarTitle, model: model) { model.beginSidebarTabDrag(tab.id) }
         .onDrop(of: [UTType.plainText], delegate: PinDropDelegate(targetID: tab.id, width: width, model: model))
         .contextMenu {
             Button(L("Loslösen")) { tab.pinned = false; model.save() }
@@ -1728,21 +1731,6 @@ private struct SidebarActiveTabJump: View {
     }
 }
 
-/// The overlay stays attached to the left window edge, while its exposed
-/// right edge reads as a floating panel.
-private struct SidebarOverlayShape: Shape {
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        Path(roundedRect: rect, cornerRadii: RectangleCornerRadii(
-            topLeading: 0,
-            bottomLeading: 0,
-            bottomTrailing: radius,
-            topTrailing: radius
-        ))
-    }
-}
-
 private struct ActiveDownloadStatus: View {
     @ObservedObject var model: BrowserModel
     @ObservedObject var downloads: DownloadStore
@@ -1940,18 +1928,9 @@ struct TabRow: View {
             if activeID != tab.id { cancelRenaming() }
         }
         .contentShape(Rectangle())
-        .onDrag {
+        // Dragging inside the name field selects text instead.
+        .sidebarDragSource(tab.id.uuidString, title: tab.sidebarTitle, model: model, enabled: !isRenaming) {
             model.beginSidebarTabDrag(tab.id)
-            return NSItemProvider(object: tab.id.uuidString as NSString)
-        } preview: {
-            HStack(spacing: 7) {
-                Image(systemName: "globe")
-                Text(tab.sidebarTitle).lineLimit(1)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(ink)
-            .padding(.horizontal, 10).frame(width: 200, height: 34, alignment: .leading)
-            .background(paper.opacity(0.95), in: RoundedRectangle(cornerRadius: Chrome.radius))
         }
         // The visual gap belongs to the preceding row's drop destination.
         // Otherwise the exact space between tabs has no native drop target.
@@ -1988,6 +1967,141 @@ struct TabRow: View {
         guard isRenaming else { return }
         isRenaming = false
         renameIsFocused = false
+    }
+}
+
+extension DropProposal {
+    /// AppKit refuses a drop whose operation the source does not offer;
+    /// `SidebarDragSource` offers `.move`.
+    static var sidebarDrop: DropProposal { DropProposal(operation: .move) }
+}
+
+/// Starts sidebar drags in AppKit. In the app's window SwiftUI's `onDrag`
+/// never lifted a row (it did in a bare `NSHostingView`), while a
+/// `DragGesture` still follows the pointer, so the gesture starts the session.
+final class SidebarDragSource: NSObject, NSDraggingSource {
+    /// Created with the sidebar, so it sees the first press after launch.
+    static let shared = SidebarDragSource()
+    /// SwiftUI may report the gesture after AppKit has moved on to another
+    /// event, so the press is remembered as well.
+    private var lastMouseEvent: NSEvent?
+    /// One drag per press: once Escape ends a session, the press's gesture
+    /// still runs and must not start another under the pointer.
+    private(set) var pressDragged = false
+    private var monitor: Any?
+    private var ended: (() -> Void)?
+    /// The event a session started from, to release its press afterwards.
+    private var sessionEvent: NSEvent?
+    /// Tests record the drag here instead of starting a system drag.
+    var startSession: (NSView, NSDraggingItem, NSEvent) -> Void = { view, item, event in
+        view.beginDraggingSession(with: [item], event: event, source: SidebarDragSource.shared)
+    }
+
+    override init() {
+        super.init()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged]) { [weak self] event in
+            if event.type == .leftMouseDown { self?.pressDragged = false }
+            self?.lastMouseEvent = event
+            return event
+        }
+    }
+
+    /// Drags `payload` as plain text from the current press. `ended` runs
+    /// once the session ends, dropped or not. False if there is no press.
+    @discardableResult
+    func begin(_ payload: String, preview: NSImage, ended: @escaping () -> Void) -> Bool {
+        pressDragged = true
+        let event = [NSApp.currentEvent, lastMouseEvent].compactMap { $0 }
+            .first { [.leftMouseDown, .leftMouseDragged].contains($0.type) && $0.window != nil }
+        guard let event, let view = event.window?.contentView else { return false }
+        let item = NSDraggingItem(pasteboardWriter: payload as NSString)
+        let point = view.convert(event.locationInWindow, from: nil)
+        item.setDraggingFrame(NSRect(x: point.x - 16, y: point.y - preview.size.height / 2,
+                                     width: preview.size.width, height: preview.size.height), contents: preview)
+        // A session that never reported its end must not keep its drag open.
+        self.ended?()
+        self.ended = ended
+        sessionEvent = event
+        startSession(view, item, event)
+        return true
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        // Only the sidebar's drops move; a text field or the page would take
+        // a copy of the ID as text.
+        context == .withinApplication ? .move : []
+    }
+
+    /// Option and Command would narrow the mask to an operation the drops refuse.
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool { true }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        let ended = self.ended
+        let press = sessionEvent
+        self.ended = nil
+        sessionEvent = nil
+        // After the drop target's own async cleanup.
+        DispatchQueue.main.async {
+            ended?()
+            // The session took the mouse-up, so SwiftUI still holds the press
+            // and would swallow the next click. Release it away from any
+            // control, so no button fires; after Escape the real one follows.
+            guard let press, let window = press.window, window.isVisible, NSEvent.pressedMouseButtons & 1 == 0,
+                  let release = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: -10_000, y: -10_000), modifierFlags: [],
+                                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                   context: nil, eventNumber: press.eventNumber, clickCount: 1, pressure: 0) else { return }
+            window.sendEvent(release)
+        }
+    }
+
+    /// The card that follows the pointer. An image renderer has no window,
+    /// so the sidebar's light or dark look is passed in.
+    @MainActor
+    static func card(_ title: String, icon: String, colorScheme: ColorScheme) -> NSImage {
+        let renderer = ImageRenderer(content: HStack(spacing: 7) {
+            Image(systemName: icon)
+            Text(title).lineLimit(1)
+        }
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(ink)
+        .padding(.horizontal, 10).frame(width: 200, height: 34, alignment: .leading)
+        .background(paper.opacity(0.95), in: RoundedRectangle(cornerRadius: Chrome.radius))
+        .environment(\.colorScheme, colorScheme))
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        var image: NSImage?
+        // `ink` and `paper` resolve against the drawing appearance.
+        NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance { image = renderer.nsImage }
+        return image ?? NSImage(size: NSSize(width: 200, height: 34))
+    }
+}
+
+extension View {
+    /// Lets the row be dragged within the sidebar as `payload`, with a card
+    /// showing `title`. `begin` records the drag in the model.
+    func sidebarDragSource(_ payload: String, title: String, icon: String = "globe", model: BrowserModel,
+                           enabled: Bool = true, begin: @escaping () -> Void) -> some View {
+        modifier(SidebarDragSourceModifier(payload: payload, title: title, icon: icon, model: model, enabled: enabled, begin: begin))
+    }
+}
+
+private struct SidebarDragSourceModifier: ViewModifier {
+    let payload: String
+    let title: String
+    let icon: String
+    let model: BrowserModel
+    let enabled: Bool
+    let begin: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(DragGesture(minimumDistance: 4).onChanged { _ in
+            let source = SidebarDragSource.shared
+            guard !source.pressDragged else { return }
+            begin()
+            let session = model.sidebarDragSessionID
+            let finish = { model.finishSidebarDrag(sessionID: session) }
+            if !source.begin(payload, preview: SidebarDragSource.card(title, icon: icon, colorScheme: colorScheme), ended: finish) { finish() }
+        }, including: enabled ? .all : .subviews)
     }
 }
 
@@ -2103,7 +2217,7 @@ struct TabReorderDropDelegate: DropDelegate {
         }
         model.autoScrollSidebarDuringDrag()
         updateIntent(for: info)
-        return DropProposal(operation: .move)
+        return .sidebarDrop
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -2170,7 +2284,7 @@ struct StripTabDropDelegate: DropDelegate {
         }
         let feedback = TabDropFeedback(targetID: targetID, intent: intent(info))
         if model.tabDropFeedback != feedback { withAnimation(.easeOut(duration: 0.08)) { model.tabDropFeedback = feedback } }
-        return DropProposal(operation: .move)
+        return .sidebarDrop
     }
     func performDrop(info: DropInfo) -> Bool {
         guard validateDrop(info: info), let sourceID = model.draggingTabID else { return false }
@@ -2273,7 +2387,7 @@ struct SidebarBottomDropDelegate: DropDelegate {
         }
         model.autoScrollSidebarDuringDrag()
         updateFeedback()
-        return DropProposal(operation: .move)
+        return .sidebarDrop
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -2357,7 +2471,7 @@ struct PinDropDelegate: DropDelegate {
             return DropProposal(operation: .forbidden)
         }
         updateFeedback(info)
-        return DropProposal(operation: .move)
+        return .sidebarDrop
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -2396,7 +2510,7 @@ struct PinPlaceholderDropDelegate: DropDelegate {
     func dropUpdated(info: DropInfo) -> DropProposal? {
         targeted = source != nil
         if targeted { model.tabDropFeedback = nil }
-        return DropProposal(operation: targeted ? .move : .forbidden)
+        return targeted ? .sidebarDrop : DropProposal(operation: .forbidden)
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -2430,7 +2544,7 @@ struct SpaceDropDelegate: DropDelegate {
     func dropUpdated(info: DropInfo) -> DropProposal? {
         targeted = validateDrop(info: info)
         if targeted { model.tabDropFeedback = nil }
-        return DropProposal(operation: targeted ? .move : .forbidden)
+        return targeted ? .sidebarDrop : DropProposal(operation: .forbidden)
     }
 
     func performDrop(info: DropInfo) -> Bool {

@@ -14,6 +14,7 @@ struct YOBROApp: App {
         Window("YoBro", id: "main") {
             BrowserShell(model: browser)
                 .id(profiles.registry.activeID)
+                .background(ReopenRegistration(delegate: delegate))
                 .frame(minWidth: 960, minHeight: 640)
                 .tint(moss)
                 .onAppear {
@@ -38,7 +39,11 @@ struct YOBROApp: App {
         .defaultSize(width: 1360, height: 880)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button(L("Neuer Tab")) { browser.openCommandBar(.newTab) }.keyboardShortcut("t")
+                Button(L("Neuer Tab")) {
+                    // Without a window, like Safari: bring the window back first.
+                    delegate.showBrowserWindow()
+                    browser.openCommandBar(.newTab)
+                }.keyboardShortcut("t")
                 Button(L("Neuer privater Tab", "New private tab")) { browser.requestPrivateTab() }.keyboardShortcut("n", modifiers: [.command, .shift])
                 Button(L("Tab schließen")) {
                     // A Peek closes first; with no tab left, ⌘W closes the window.
@@ -128,9 +133,58 @@ struct YOBROApp: App {
     }
 }
 
+/// Hands SwiftUI's window opener to the app delegate, so the Dock can bring
+/// the browser window back after it was closed.
+private struct ReopenRegistration: View {
+    let delegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        WindowReporter { delegate.browserWindow = $0 }
+            .frame(width: 0, height: 0)
+            .onAppear { delegate.reopenWindow = { openWindow(id: "main") } }
+    }
+}
+
+/// Reports the window its view is placed in.
+private struct WindowReporter: NSViewRepresentable {
+    let report: (NSWindow?) -> Void
+    func makeNSView(context: Context) -> NSView { Reporter(report: report) }
+    func updateNSView(_ view: NSView, context: Context) {}
+    final class Reporter: NSView {
+        let report: (NSWindow?) -> Void
+        init(report: @escaping (NSWindow?) -> Void) { self.report = report; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { nil }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); report(window) }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var browser: BrowserModel?
+    /// Shows the browser window again; set once it has appeared.
+    var reopenWindow: (() -> Void)?
     private var tabKeyMonitor: Any?
+    weak var browserWindow: NSWindow?
+    /// The browser window is on screen, not minimized or closed.
+    var browserWindowIsShown: Bool {
+        guard let window = browserWindow else { return false }
+        return window.isVisible && !window.isMiniaturized
+    }
+    /// Brings a minimized browser window back as it was, or rebuilds a closed
+    /// one. Returns false if there was nothing to do or nothing could be done.
+    @discardableResult
+    func showBrowserWindow() -> Bool {
+        guard !browserWindowIsShown else { return false }
+        if let window = browserWindow, window.isMiniaturized {
+            window.deminiaturize(nil)
+            return true
+        }
+        // A closed window's view graph is gone and only SwiftUI can rebuild it;
+        // bringing a leftover NSWindow forward showed nothing. `Window` is a
+        // single scene, so this never opens a second one.
+        guard let reopenWindow else { return false }
+        reopenWindow()
+        return true
+    }
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
@@ -192,12 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // remains available in the Dock and can restore its window on the next click.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag, let window = sender.windows.first(where: { $0.canBecomeMain }) {
-            window.makeKeyAndOrderFront(nil)
-            // We handled the reopen. Returning true also asks SwiftUI to show
-            // the Window scene again, potentially recreating the view graph.
-            return false
-        }
-        return true
+        // Only the browser window counts: an open Settings window must not
+        // keep a Dock click from bringing it back. AppKit handles the rest.
+        !showBrowserWindow()
     }
 }

@@ -60,5 +60,11 @@ final class SidebarResizeTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(tab.webView.bounds.width, 1200 - 2 * Chrome.inset, accuracy: 2)
         XCTAssertEqual(model.sidebarWidth, 360)
+        // The page steps aside for the whole floating sidebar, however wide:
+        // a fixed 260 pt let the page take presses on a wide sidebar's rows.
+        model.sidebarOverlayVisible = true
+        let pageHost = try XCTUnwrap(tab.webView.superview)
+        XCTAssertNil(tab.webView.hitTest(pageHost.convert(NSPoint(x: 350, y: 300), from: nil)))
+        XCTAssertNotNil(tab.webView.hitTest(pageHost.convert(NSPoint(x: 600, y: 300), from: nil)))
     }
 }
