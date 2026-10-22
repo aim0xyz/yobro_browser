@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct YOBROApp: App {
@@ -17,6 +18,7 @@ struct YOBROApp: App {
                 .tint(moss)
                 .onAppear {
                     browser.startBridge()
+                    browser.mail.startPolling()
                     browser.updates.start()
                     browser.showOnboarding = !OnboardingProgress.isComplete(home: browser.home)
                     delegate.browser = browser
@@ -91,6 +93,7 @@ struct YOBROApp: App {
                 Button(L("Lesezeichen", "Bookmarks")) { browser.librarySection = .bookmarks }
                     .keyboardShortcut("b", modifiers: [.command, .option])
                 Button(L("Assistent", "Assistant")) { browser.showAgent.toggle() }.keyboardShortcut("a", modifiers: [.command, .shift])
+                Button(L("Mail", "Mail")) { browser.presentMail(!browser.showMail) }.keyboardShortcut("m", modifiers: [.command, .shift])
                 Button(L("Kontrollzentrum", "Control Center")) { browser.showControlCenter = true }.keyboardShortcut("p", modifiers: [.command, .option])
                 Button(L("Splitview", "Split view")) { browser.toggleSplit() }.keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
@@ -125,10 +128,29 @@ struct YOBROApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var browser: BrowserModel?
     private var tabKeyMonitor: Any?
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+    /// A new-mail alert opens Mail on its account, in the profile that is open now.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let value = response.notification.request.content.userInfo["account"] as? String, let id = UUID(uuidString: value) {
+            Task { @MainActor in
+                guard let browser = self.browser, browser.isProfileActive, browser.mail.accounts.contains(where: { $0.id == id }) else { return }
+                browser.presentMail()
+                browser.mail.selectFolder(account: id)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+        completionHandler()
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Notification Center needs an app bundle; a bare test binary has none.
+        if Bundle.main.bundleIdentifier != nil { UNUserNotificationCenter.current().delegate = self }
         // Test only: never change the user's global macOS appearance.
         if ProcessInfo.processInfo.environment["YOBRO_DEV_CAPTURE"] == "1",
            let mode = ProcessInfo.processInfo.environment["YOBRO_TEST_APPEARANCE"] {

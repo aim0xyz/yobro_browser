@@ -1028,6 +1028,8 @@ final class BrowserModel: ObservableObject {
     var bridgePolicyURL: URL { home.appendingPathComponent("bridge-policy.json") }
 
     @Published var showAgent = false
+    /// YoBro Mail fills the page area until a tab is opened or selected.
+    @Published var showMail = false
     /// The centred address and search field (⌘T, ⌘L). `nil` while closed.
     @Published var commandBar: CommandBarMode?
     /// YAB's alternative layout: tabs in a strip above the page instead of
@@ -1105,7 +1107,11 @@ final class BrowserModel: ObservableObject {
     @Published var creatingProfile = false
     @Published var settingsSection = L("Allgemein", "General")
     @Published var profileName = L("Privat", "Personal")
-    var isProfileActive = true { didSet { if !isProfileActive { chat.cancel(); pauseAgentWorkspace() } } }
+    var isProfileActive = true {
+        didSet {
+            if isProfileActive { mail.startPolling() } else { chat.cancel(); pauseAgentWorkspace(); mail.stopPolling() }
+        }
+    }
     weak var profileSession: BrowserProfiles?
     let controlSocketURL: URL
     let home: URL
@@ -1129,6 +1135,7 @@ final class BrowserModel: ObservableObject {
     }
     let downloads: DownloadStore
     let chat: SpaceChatStore
+    let mail: MailStore
     let webAppearance: WebAppearance
     let pageZoom: PageZoomStore
     let updates = UpdateService.shared
@@ -1158,6 +1165,7 @@ final class BrowserModel: ObservableObject {
         controlSocketURL = root.appendingPathComponent(original ? "control.sock" : "p-\(profile!.id.uuidString).sock")
         downloads = DownloadStore(home: home, isolated: testing || !original)
         chat = SpaceChatStore(home: home)
+        mail = MailStore(home: home)
         webAppearance = WebAppearance(home: home)
         pageZoom = PageZoomStore(home: home)
         if testing { websiteDataStore = .nonPersistent() }
@@ -1332,6 +1340,7 @@ final class BrowserModel: ObservableObject {
 
     @discardableResult
     func newTab(url: String = "", space targetSpace: String? = nil, isPrivate: Bool = false, webViewConfiguration: WKWebViewConfiguration? = nil, useConfigurationDirectly: Bool = false) -> BrowserTab {
+        showMail = false
         if let targetSpace, targetSpace != space {
             switchSpace(targetSpace)
         }
@@ -1359,8 +1368,14 @@ final class BrowserModel: ObservableObject {
         save()
     }
 
+    func presentMail(_ presented: Bool = true) {
+        if presented { closePeek() }
+        showMail = presented
+    }
+
     func select(_ id: UUID) {
         guard let tab = tabs.first(where: { $0.id == id }), !agentTabIDs.contains(id) else { return }
+        showMail = false
         // A preview belongs to the page it was opened from.
         if peekTab != nil, id != peekOpenerID { closePeek() }
         tab.lastActiveAt = Date()
@@ -1381,6 +1396,7 @@ final class BrowserModel: ObservableObject {
     /// used tab is shown, but never a folder or pinned page the user closed.
     func switchSpace(_ value: String) {
         guard value != space else { return }
+        showMail = false
         closePeek()
         space = value; splitID = nil
         let candidates = visibleTabs

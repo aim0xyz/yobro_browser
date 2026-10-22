@@ -47,13 +47,13 @@ mkdir -p "$APP/Contents/Resources/YOBRO_YOBRO.bundle" "$APP/Contents/Resources/Y
 RESOURCES="$BUILD_BIN/YOBRO_YOBRO.bundle"
 if [ -d "$RESOURCES/Contents/Resources" ]; then RESOURCES="$RESOURCES/Contents/Resources"; fi
 # Explicit allowlist. Never copy the checkout, a home directory or runtime state.
-for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js \
+for resource in AgentBridge.js MailWorker.py BrowserImport.py DarkReader.js WebAppearance.js \
   DarkReader-LICENSE.txt English.json YOBROMark.png LoginAutofill.js PageSignals.js \
   uBlockOriginLite.safari.zip uBlockOriginLite-NOTICE.txt; do
   cp "$RESOURCES/$resource" "$APP/Contents/Resources/YOBRO_YOBRO.bundle/$resource"
 done
 cp Sources/YOBROMCP/Resources/tools.json "$APP/Contents/Resources/YOBRO_YOBROMCP.bundle/"
-for resource in AgentBridge.js BrowserImport.py DarkReader.js WebAppearance.js DarkReader-LICENSE.txt; do
+for resource in AgentBridge.js MailWorker.py BrowserImport.py DarkReader.js WebAppearance.js DarkReader-LICENSE.txt; do
   cp "$RESOURCES/$resource" "$APP/Contents/Resources/$resource"
 done
 cp bin/yobro "$APP/Contents/MacOS/yobroctl"

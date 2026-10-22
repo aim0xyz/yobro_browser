@@ -487,7 +487,15 @@ struct BrowserShell: View {
 
     @ViewBuilder
     private var workspace: some View {
-        if model.agentWorkspaceVisible, let agent = model.agentTab {
+        if model.showMail {
+            MailWorkspace(store: model.mail, close: { model.presentMail(false) },
+                          openURL: { model.newTab(url: $0.absoluteString) },
+                          askAssistant: { item, body, prompt in
+                              model.chat.stageMail(item, body: body, prompt: prompt, space: model.space)
+                              model.showAgent = true
+                          })
+                .pageCard()
+        } else if model.agentWorkspaceVisible, let agent = model.agentTab {
             // The agent owns the right half, so a user split collapses to its
             // active page instead of squeezing three pages side by side.
             HSplitView {
@@ -947,6 +955,7 @@ private struct TopTabStrip: View {
             }
             // A gap that always moves the window, however many tabs are open.
             Color.clear.frame(width: 44)
+            MailButton(model: model, mail: model.mail, size: 28)
             Button { model.showAgent.toggle() } label: {
                 Image(systemName: "sparkles")
                     .overlay(alignment: .topTrailing) {
@@ -1582,6 +1591,7 @@ private struct SidebarFooter: View {
                 .onChange(of: model.spaces) { _, _ in proxy.scrollTo(model.space) }
             }
             Spacer(minLength: 2)
+            MailButton(model: model, mail: model.mail)
             Button { model.showAgent.toggle() } label: {
                 Image(systemName: "sparkles")
                     .overlay(alignment: .topTrailing) {

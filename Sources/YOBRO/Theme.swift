@@ -125,15 +125,26 @@ struct YOBROPopupButtonStyle: ButtonStyle {
     var prominent = false
     var color: Color = moss
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(prominent ? YOBROTheme.page : ink)
-            .padding(.horizontal, 14).frame(minHeight: 34)
-            .background(
-                prominent ? color.opacity(configuration.isPressed ? 0.76 : 1) : YOBROTheme.surface.opacity(configuration.isPressed ? 0.44 : 0.72),
-                in: RoundedRectangle(cornerRadius: 9)
-            )
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(prominent ? .clear : YOBROTheme.border.opacity(0.48), lineWidth: 1))
+        Surface(configuration: configuration, prominent: prominent, color: color)
+    }
+    private struct Surface: View {
+        let configuration: ButtonStyle.Configuration
+        let prominent: Bool
+        let color: Color
+        @Environment(\.isEnabled) private var enabled
+        var body: some View {
+            configuration.label
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(prominent ? YOBROTheme.page : ink)
+                .padding(.horizontal, 14).frame(minHeight: 34)
+                .background(
+                    prominent ? color.opacity(configuration.isPressed ? 0.76 : 1) : YOBROTheme.surface.opacity(configuration.isPressed ? 0.44 : 0.72),
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(prominent ? .clear : YOBROTheme.border.opacity(0.48), lineWidth: 1))
+                // A disabled button must look it, not only ignore clicks.
+                .opacity(enabled ? 1 : 0.4)
+        }
     }
 }
 
