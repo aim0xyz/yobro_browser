@@ -62,10 +62,17 @@ shasum -a 256 "$LATEST_DMG" > "$LATEST_SHA"
 APPCAST_INPUT=$(mktemp -d)
 trap 'rm -rf "$APPCAST_INPUT"' EXIT
 cp "$DMG" "$APPCAST_INPUT/"
+# The prefix is a base URL: without the trailing slash generate_appcast drops
+# the tag and Sparkle downloads from a 404.
+DOWNLOAD_PREFIX="https://github.com/aim0xyz/yobro_browser/releases/download/$TAG/"
 .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
-  --download-url-prefix "https://github.com/aim0xyz/yobro_browser/releases/download/$TAG" \
+  --download-url-prefix "$DOWNLOAD_PREFIX" \
   --link "https://github.com/aim0xyz/yobro_browser" \
   -o dist/appcast.xml "$APPCAST_INPUT"
+if ! grep -qF "url=\"$DOWNLOAD_PREFIX$(basename "$DMG")\"" dist/appcast.xml; then
+  echo "appcast.xml does not point at $DOWNLOAD_PREFIX$(basename "$DMG"); not publishing." >&2
+  exit 1
+fi
 gh release create "$TAG" "$DMG" "$DMG.sha256" "$LATEST_DMG" "$LATEST_SHA" dist/appcast.xml \
   --repo aim0xyz/yobro_browser \
   --title "YoBro $VERSION" \
