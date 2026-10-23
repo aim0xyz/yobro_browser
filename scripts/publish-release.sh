@@ -30,6 +30,18 @@ if gh release view "$TAG" --repo aim0xyz/yobro_browser >/dev/null 2>&1; then
   echo "Release $TAG already exists; refusing to overwrite it." >&2
   exit 1
 fi
+# The bundled uBlock Origin Lite never updates itself, and YouTube breaks old
+# releases within weeks. Below the YouTube minimum (2) always stops; behind
+# the latest release or unknown (1) can be overridden deliberately.
+UBLOCK_STATUS=0
+python3 scripts/check-ublock-freshness.py || UBLOCK_STATUS=$?
+if [[ $UBLOCK_STATUS -ne 0 ]]; then
+  if [[ $UBLOCK_STATUS -ne 1 || "${YOBRO_ALLOW_STALE_UBLOCK:-}" != 1 ]]; then
+    echo "Update the bundled uBlock Origin Lite first (docs/RELEASING.md)." >&2
+    exit 1
+  fi
+  echo "Warning: publishing with a uBlock Origin Lite that is not current (YOBRO_ALLOW_STALE_UBLOCK=1)." >&2
+fi
 
 scripts/build-dmg.sh --release
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/YoBro.app/Contents/Info.plist)

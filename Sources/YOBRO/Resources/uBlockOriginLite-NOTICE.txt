@@ -9,4 +9,4 @@ YoBro modification: js/ext.js recognizes webkit-extension: as Safari, not Chromi
 Manifest version incremented to reinitialize filtering rules. Filter lists are unchanged.
 Reproducible patch: scripts/prepare-bundled-ublock.py (repository root).
 Upstream SHA-256: 6c80d19c128cd3f6b5d1ff2ef151fa0ff31565da3c5ef6841443381702b92838
-Bundled SHA-256: d0d262487f91671a5a9872cb248521f9d8096a6c8b2cfac1500e1f664714d8a2
+Bundled SHA-256: e2d5e28f9d296ae41b07df9950e421948f99926ffbae58e2d33f2bf65c5603ae

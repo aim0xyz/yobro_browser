@@ -1,8 +1,29 @@
+import CryptoKit
 import XCTest
 import WebKit
 @testable import YOBRO
 
 final class ExtensionRuntimeTests: XCTestCase {
+    static let bundledBlockerPackage = YOBROResources.bundle.url(forResource: "uBlockOriginLite.safari", withExtension: "zip")
+
+    /// scripts/prepare-bundled-ublock.py writes the package and its notice
+    /// together; a hand-edited package or notice must not ship.
+    @MainActor
+    func testBundledBlockerNoticeMatchesPackage() async throws {
+        guard #available(macOS 15.4, *) else { throw XCTSkip("Needs macOS 15.4") }
+        let package = try XCTUnwrap(Self.bundledBlockerPackage)
+        let noticeURL = try XCTUnwrap(YOBROResources.bundle.url(forResource: "uBlockOriginLite-NOTICE", withExtension: "txt"))
+        let notice = try String(contentsOf: noticeURL, encoding: .utf8)
+        let digest = SHA256.hash(data: try Data(contentsOf: package)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertTrue(notice.contains("Bundled SHA-256: \(digest)\n"), "Regenerate with scripts/prepare-bundled-ublock.py")
+        let bundled = try await WKWebExtension(resourceBaseURL: package)
+        let version = try XCTUnwrap(bundled.version)
+        let upstream = version.split(separator: ".").dropLast().joined(separator: ".")
+        XCTAssertTrue(notice.contains("YoBro compatibility version: \(version)\n"))
+        XCTAssertTrue(notice.contains("Based on official Safari release: \(upstream)\n"))
+        XCTAssertTrue(notice.contains("releases/tag/\(upstream)\n"))
+    }
+
     @MainActor
     func testBundledUpgradePreservesDisabledStateAndIdentity() async throws {
         guard #available(macOS 15.6, *) else { throw XCTSkip("Needs WebKit 18.6") }
@@ -15,8 +36,9 @@ final class ExtensionRuntimeTests: XCTestCase {
         try Data(old.version.utf8).write(to: store.directory.appendingPathComponent("bundled-blocker-installed"))
         await store.installBundledBlockerIfNeeded()
         let updated = try XCTUnwrap(store.entries.first, store.message ?? "No entry")
+        let bundled = try await WKWebExtension(resourceBaseURL: XCTUnwrap(Self.bundledBlockerPackage))
         XCTAssertEqual(updated.id, old.id)
-        XCTAssertEqual(updated.version, "2026.1021.1354.1")
+        XCTAssertEqual(updated.version, bundled.version)
         XCTAssertFalse(updated.enabled)
         XCTAssertEqual(updated.permissions, old.permissions)
         XCTAssertTrue(store.runtime.contexts.isEmpty)

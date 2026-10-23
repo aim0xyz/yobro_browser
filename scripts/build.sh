@@ -5,6 +5,8 @@ if [ -z "${YOBRO_SIGN_IDENTITY+x}" ] && [ -f .yobro-signing-identity ]; then
   IFS= read -r YOBRO_SIGN_IDENTITY < .yobro-signing-identity
   export YOBRO_SIGN_IDENTITY
 fi
+# Offline reminder only; scripts/publish-release.sh checks upstream.
+python3 scripts/check-ublock-freshness.py --offline || true
 # Keep developer names and checkout paths out of shipped Mach-O metadata.
 BUILD_ROOT="${YOBRO_BUILD_ROOT:-/private/tmp/yobro-distribution-build-$UID}"
 swift build -c release --scratch-path "$BUILD_ROOT" \
