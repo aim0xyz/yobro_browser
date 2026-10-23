@@ -16,7 +16,7 @@ final class ExtensionRuntimeTests: XCTestCase {
         await store.installBundledBlockerIfNeeded()
         let updated = try XCTUnwrap(store.entries.first, store.message ?? "No entry")
         XCTAssertEqual(updated.id, old.id)
-        XCTAssertEqual(updated.version, "2026.914.1325.1")
+        XCTAssertEqual(updated.version, "2026.1021.1354.1")
         XCTAssertFalse(updated.enabled)
         XCTAssertEqual(updated.permissions, old.permissions)
         XCTAssertTrue(store.runtime.contexts.isEmpty)
@@ -149,6 +149,79 @@ final class ExtensionRuntimeTests: XCTestCase {
         XCTAssertTrue(store.entries.first?.enabled == true)
         XCTAssertTrue(store.runtime.contexts[ExtensionStore.bundledBlockerID]?.isLoaded == true)
         XCTAssertFalse(store.busy)
+    }
+
+    /// uBOL answers YouTube's ad-block stall with a reload loop: it tags the
+    /// next player request with a strategy, reloads the video, and moves on to
+    /// the next strategy only when the tag came back in the player response.
+    /// The 2026.914 rules tagged XMLHttpRequest bodies, which YouTube no longer
+    /// sends, so the same reload repeated forever: a frozen picture whose time
+    /// flipped between 0:00 and the full length. This stalled fake player
+    /// serializes its request like YouTube; the loop must give up on its own.
+    @MainActor
+    func testBundledBlockerYouTubeStallRecoveryTerminates() async throws {
+        guard #available(macOS 15.6, *) else { throw XCTSkip("Needs WebKit 18.6") }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let store = ExtensionStore(home: home, websiteDataStore: .nonPersistent())
+        await store.installBundledBlockerIfNeeded()
+        let entry = try XCTUnwrap(store.entries.first, store.message ?? "Missing bundled blocker")
+        let context = try XCTUnwrap(store.runtime.contexts[entry.id])
+        try await store.runtime.waitForBundledBlocker(context)
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        store.configure(config)
+        let page = WKWebView(frame: .zero, configuration: config)
+        defer { page.stopLoading() }
+        let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+        page.loadHTMLString("""
+            <!doctype html><html><head><script>
+            window.ytcfg = {data_: {INNERTUBE_CONTEXT: {client: {clientName: 'WEB', userAgent: '\(userAgent)'}}}};
+            </script></head><body><div id="masthead" logo-type="YOUTUBE_LOGO"></div><div id="movie_player"></div>
+            <script>if (window.ytcsi) { window.ytcsi.tick('js_ld', null, ''); }</script>
+            <script>
+            let response = {videoDetails: {videoId: 'fixture'}, playerConfig: {}, playbackTracking: {videostatsPlaybackUrl: {baseUrl: 'https://s.youtube.com/api/stats/playback'}}};
+            window.reloads = 0;
+            Object.assign(document.getElementById('movie_player'), {
+              getPlayerResponse: () => response,
+              getStatsForNerds: () => ({debug_info: 'SABR', buffer_health_seconds: '0.00 s', resolution: '0x0'}),
+              getProgressState: () => ({current: 0, duration: 212, loaded: 0}),
+              getPlayerStateObject: () => ({isBuffering: true}),
+              seekTo() {},
+              loadVideoById(videoId) {
+                window.reloads++;
+                const body = JSON.parse(JSON.stringify({videoId, attestationRequest: {},
+                  context: {client: window.ytcfg.data_.INNERTUBE_CONTEXT.client},
+                  playbackContext: {contentPlaybackContext: {referer: location.href}}}));
+                response = {...response, playbackTracking: {videostatsPlaybackUrl: {baseUrl:
+                  'https://s.youtube.com/api/stats/playback?referer=' + encodeURIComponent(body.playbackContext.contentPlaybackContext.referer)}}};
+              },
+            });
+            </script></body></html>
+            """, baseURL: URL(string: "https://www.youtube.com/watch?v=fixture"))
+        // The initial blank document is already "complete"; wait for the fixture itself.
+        var loaded = false
+        for _ in 0..<100 where !loaded {
+            loaded = (try? await page.evaluateJavaScript("document.readyState === 'complete' && typeof window.reloads === 'number'")) as? Bool == true
+            if !loaded { try await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        XCTAssertTrue(loaded, "The YouTube fixture did not load")
+        // YouTube reports its ad-block stall through a snackbar message; each
+        // DOM change runs the blocker's player check.
+        func stallAgain(_ times: Int) async throws -> Int {
+            for _ in 0..<times {
+                _ = try await page.evaluateJavaScript("new Map().has('onSnackbarMessage'); document.body.append(document.createElement('i')); 0")
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            let reloads = try await page.evaluateJavaScript("window.reloads") as? Int
+            return try XCTUnwrap(reloads)
+        }
+        let reloads = try await stallAgain(12)
+        XCTAssertGreaterThan(reloads, 0, "The bundled YouTube scriptlets must run on the fixture")
+        let more = try await stallAgain(8)
+        XCTAssertEqual(more, reloads, "Each strategy must be tried once; then the video is left alone")
+        let agent = try await page.evaluateJavaScript("window.ytcfg.data_.INNERTUBE_CONTEXT.client.userAgent") as? String
+        XCTAssertEqual(agent, userAgent, "Giving up must restore YouTube's own client identity")
     }
 
     @MainActor
