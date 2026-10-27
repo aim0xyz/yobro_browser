@@ -1,6 +1,0 @@
-option(YOBRO_BUILD_QT_SPIKE "Build the Qt WebEngine feasibility application" ON)
-option(YOBRO_BUILD_QML_SHELL "Build the Qt Quick (QML) shell application" ON)
-option(YOBRO_PACKAGE_APP "Install a self-contained macOS feasibility bundle" OFF)
-set(YOBRO_QT_VERSION "6.11.2" CACHE STRING "Exact Qt version used by the feasibility spike")
-set(YOBRO_QT_WEBENGINE_PREFIX "" CACHE PATH "Qt WebEngine package prefix used for packaging evidence")
-set(YOBRO_QT_PLUGIN_DIR "" CACHE PATH "Qt plugin directory used for packaging")

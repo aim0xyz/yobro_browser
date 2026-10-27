@@ -20,3 +20,24 @@ CMakeFiles/
 
 # website/ has its own git repository; tracked separately
 website/
+
+# Kept on the development Mac only, not in the public repository.
+/tests/
+/docs/
+/marketing-kit/
+/chromium/
+/ios/
+/supabase/
+/contracts/
+/semantic-review/
+/plugins/
+/.kiro/
+/.agents/
+/.claude/
+/AGENTS.md
+/PLAN.md
+/scripts/chromium-*
+/scripts/icon.swift
+/Resources/YOBRO-logo-*.png
+/Resources/YOBRO.iconset/
+/*.png
